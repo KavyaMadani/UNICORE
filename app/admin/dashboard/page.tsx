@@ -160,6 +160,7 @@ export default function AdminDashboard() {
             <CardTitle style={{ marginBottom: 16 }}>Quick Actions</CardTitle>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {[
+                { label: 'Manage Users', icon: <Users size={14} />, href: '/admin/users' },
                 { label: 'Add College', icon: <Plus size={14} />, href: '/admin/colleges' },
                 { label: 'Add Organization', icon: <Building2 size={14} />, href: '/admin/organizations' },
                 { label: 'View Analytics', icon: <TrendingUp size={14} />, href: '/admin/analytics' },

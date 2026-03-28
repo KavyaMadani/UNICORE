@@ -1,70 +1,55 @@
-// ─── HARDCODED ADMIN EMAILS ──────────────────────────────────────────────────
-// These are the ONLY place admin emails are stored. Never expose in UI.
+/**
+ * Role Guard — the ONLY place where role logic lives.
+ *
+ * Admin emails are hardcoded (they bypass Supabase RLS).
+ * All other roles come from the `profiles.role` column in Supabase.
+ * Manager and Organization roles are assigned in the DB, not by email pattern.
+ */
+
+// ─── HARDCODED ADMINS (only these 2 accounts) ─────────────────────────────────
 const ADMIN_EMAILS: readonly string[] = [
   'kavyamadani10@gmail.com',
   'hardikparmar8083@gmail.com',
 ] as const;
 
-// ─── DEMO ACCOUNTS WITH FIXED ROLES ──────────────────────────────────────────
-// These demo accounts are used for testing/demo purposes.
-// Passwords are set in Supabase Auth — see credentials below.
-const MANAGER_EMAILS: readonly string[] = [
-  'manager@hackforge.dev',
-  'rajesh.mgr@iitb.ac.in',
-  'ananya.mgr@iitd.ac.in',
-  'rahul.mgr@iitb.ac.in',
-] as const;
-
-const ORGANIZATION_EMAILS: readonly string[] = [
-  'org@hackforge.dev',
-  'tech@iitb.ac.in',
-  'innovation@iitd.ac.in',
-  'hackathon@bits-pilani.ac.in',
-] as const;
-
 export type UserRole = 'admin' | 'organization' | 'manager' | 'student';
 
-/**
- * Returns true if the email is a hardcoded platform admin
- */
 export function isAdminEmail(email: string): boolean {
   return ADMIN_EMAILS.includes(email.toLowerCase().trim());
 }
 
 /**
- * Returns true if the email is a manager demo account
- */
-export function isManagerEmail(email: string): boolean {
-  return MANAGER_EMAILS.includes(email.toLowerCase().trim());
-}
-
-/**
- * Returns true if the email is an organization demo account
- */
-export function isOrganizationEmail(email: string): boolean {
-  return ORGANIZATION_EMAILS.includes(email.toLowerCase().trim());
-}
-
-/**
- * Derives the correct role from an email address.
- * Priority: admin > organization > manager > student
+ * Derives role from DB profile role field.
+ * Admin override: if email is in ADMIN_EMAILS, always return 'admin'.
+ * Otherwise use the role stored in the DB profile (set when admin assigns role).
  */
 export function getRoleFromEmail(email: string): UserRole {
   const e = email.toLowerCase().trim();
   if (isAdminEmail(e)) return 'admin';
-  if (isOrganizationEmail(e)) return 'organization';
-  if (isManagerEmail(e)) return 'manager';
+  // For non-admins, role is determined by DB profile (default: student)
+  // This function is only called as a fallback — prefer DB role via getProfile()
   return 'student';
 }
 
 /**
- * Get all routes that are accessible for a given role (hierarchical)
+ * Derive role from DB profile. Admin email always wins.
+ */
+export function getRoleFromProfile(email: string, dbRole?: string | null): UserRole {
+  const e = email.toLowerCase().trim();
+  if (isAdminEmail(e)) return 'admin';
+  if (dbRole === 'organization') return 'organization';
+  if (dbRole === 'manager') return 'manager';
+  return 'student';
+}
+
+/**
+ * Get all routes accessible for a given role
  */
 const ROLE_ROUTES: Record<UserRole, string[]> = {
-  admin: ['/admin', '/organization', '/manager', '/student'],
+  admin:        ['/admin', '/organization', '/manager', '/student'],
   organization: ['/organization', '/student'],
-  manager: ['/manager', '/student'],
-  student: ['/student'],
+  manager:      ['/manager', '/student'],
+  student:      ['/student'],
 };
 
 export function canAccessRoute(role: UserRole, pathname: string): boolean {
@@ -72,9 +57,6 @@ export function canAccessRoute(role: UserRole, pathname: string): boolean {
   return allowed.some((prefix) => pathname.startsWith(prefix));
 }
 
-/**
- * Get the redirect path for unauthorized access
- */
 export function getUnauthorizedRedirect(role: UserRole): string {
   switch (role) {
     case 'admin': return '/admin/dashboard';

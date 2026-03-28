@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { signInWithEmail, getDashboardForRole, signUpStudent } from '@/lib/auth';
+import { signInWithEmail, getDashboardForRole } from '@/lib/auth';
 import { Zap, Eye, EyeOff, AlertCircle, ArrowRight } from 'lucide-react';
 
 export default function SignInPage() {
@@ -14,11 +14,6 @@ export default function SignInPage() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Demo account credentials — must match Supabase Auth
-  const DEMO_ACCOUNTS: Record<string, { password: string; name: string }> = {
-    'manager@hackforge.dev': { password: 'Manager@123', name: 'Demo Manager' },
-    'org@hackforge.dev': { password: 'Org@12345', name: 'Demo Organization' },
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,18 +26,6 @@ export default function SignInPage() {
     try {
       let result = await signInWithEmail(email.trim(), password);
 
-      // If a demo account doesn't exist yet → auto-register it then sign in
-      if ((result.error || !result.user) && DEMO_ACCOUNTS[email.trim().toLowerCase()]) {
-        const demo = DEMO_ACCOUNTS[email.trim().toLowerCase()];
-        if (password === demo.password) {
-          // Try to register the demo account
-          await signUpStudent(email.trim(), password, demo.name);
-          // Brief wait for Supabase to confirm the account
-          await new Promise(r => setTimeout(r, 800));
-          // Retry sign-in
-          result = await signInWithEmail(email.trim(), password);
-        }
-      }
 
       const { user, error } = result;
       if (error || !user) {
@@ -219,34 +202,7 @@ export default function SignInPage() {
             </Link>
           </p>
 
-          {/* Demo Accounts */}
-          <div style={{ marginTop: '1.5rem', padding: '1rem', borderRadius: 14, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-            <p style={{ fontSize: 11, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10, textAlign: 'center' }}>Demo Accounts — click to auto-fill</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {[
-                { label: '🛠️ Event Manager', email: 'manager@hackforge.dev', password: 'Manager@123' },
-                { label: '🏢 Organization', email: 'org@hackforge.dev', password: 'Org@12345' },
-              ].map(demo => (
-                <button
-                  key={demo.email}
-                  type="button"
-                  onClick={() => { setEmail(demo.email); setPassword(demo.password); }}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '9px 14px', borderRadius: 10, width: '100%',
-                    background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.15)',
-                    color: '#a5b4fc', fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
-                    cursor: 'pointer', transition: 'all 0.15s ease', textAlign: 'left',
-                  }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(99,102,241,0.12)'; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(99,102,241,0.06)'; }}
-                >
-                  <span>{demo.label}</span>
-                  <span style={{ color: '#4b5563', fontFamily: 'monospace', fontSize: 11 }}>{demo.email}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+
         </motion.div>
       </div>
 

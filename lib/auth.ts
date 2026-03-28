@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { getRoleFromEmail } from './role-guard';
+import { getRoleFromEmail, getRoleFromProfile } from './role-guard';
 import type { UserRole } from './role-guard';
 export type { UserRole };
 
@@ -26,38 +26,29 @@ export async function signInWithEmail(
     if (error) return { user: null, error: error.message };
     if (!data.user) return { user: null, error: 'No user returned from auth' };
 
-    const correctRole = getRoleFromEmail(email);
+    const profile = await getProfile(data.user.id);
+    const correctRole = getRoleFromProfile(email, profile?.role ?? null);
     const correctName =
       data.user.user_metadata?.name ??
       data.user.user_metadata?.full_name ??
       email.split('@')[0];
 
-    // Attempt to upsert profile (may fail silently due to RLS — that's OK)
+    // Attempt to upsert profile
     try {
       await supabase.from('profiles').upsert(
         { id: data.user.id, email, name: correctName, role: correctRole },
         { onConflict: 'id' }
       );
-      if (correctRole === 'admin') {
-        await supabase
-          .from('profiles')
-          .update({ role: 'admin' })
-          .eq('id', data.user.id);
-      }
     } catch {
-      // Silently ignore DB errors — we build user from auth data instead
+      // Silently ignore DB errors
     }
 
-    // Attempt to read profile, but don't block login on failure
-    const profile = await getProfile(data.user.id);
-
-    // Always return a valid user — role comes from email logic, never from broken DB
     return {
       user: {
         id: data.user.id,
         email,
         name: profile?.name ?? correctName,
-        role: correctRole, // ← Always use email-derived role, never trust DB role
+        role: correctRole,
         college: profile?.college,
         organizationId: profile?.organizationId,
         avatarUrl: profile?.avatarUrl,
@@ -72,6 +63,7 @@ export async function signInWithEmail(
 
 /**
  * Sign up a new student account.
+ * Auto-detects college from email domain (e.g. charusat.edu.in → "Charusat University").
  */
 export async function signUpStudent(
   email: string,
@@ -83,24 +75,33 @@ export async function signUpStudent(
     if (error) return { user: null, error: error.message };
     if (!data.user) return { user: null, error: 'Signup failed — no user returned.' };
 
-    const role = getRoleFromEmail(email);
+    const role = getRoleFromEmail(email); // always 'student' for non-admins
 
-    // Attempt profile creation (may fail due to RLS)
+    // Auto-detect college from email domain
+    let detectedCollege = '';
+    try {
+      const { detectCollegeFromEmail } = await import('./college-detect');
+      const result = await detectCollegeFromEmail(email);
+      detectedCollege = result.college ?? '';
+    } catch { /* non-fatal */ }
+
+    // Attempt profile creation with college
     try {
       await supabase.from('profiles').upsert(
-        { id: data.user.id, email, name, role },
+        { id: data.user.id, email, name, role, college: detectedCollege || null },
         { onConflict: 'id' }
       );
     } catch {
-      // Silently ignore
+      // Silently ignore RLS errors
     }
 
-    return { user: { id: data.user.id, email, name, role }, error: null };
+    return { user: { id: data.user.id, email, name, role, college: detectedCollege || null }, error: null };
   } catch (err) {
     console.error('[signUpStudent]', err);
     return { user: null, error: 'Signup failed. Please try again.' };
   }
 }
+
 
 /**
  * Sign out the current user.
@@ -125,20 +126,19 @@ export async function getSession(): Promise<AppUser | null> {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) return null;
     const email = session.user.email ?? '';
-    const role = getRoleFromEmail(email);
     const name =
       session.user.user_metadata?.name ??
       session.user.user_metadata?.full_name ??
       email.split('@')[0];
 
-    // Try DB for extra fields, but don't block on failure
     const dbProfile = await getProfile(session.user.id);
+    const role = getRoleFromProfile(email, dbProfile?.role ?? null);
 
     return {
       id: session.user.id,
       email,
       name: dbProfile?.name ?? name,
-      role, // Always from email logic
+      role,
       college: dbProfile?.college,
       organizationId: dbProfile?.organizationId,
       avatarUrl: dbProfile?.avatarUrl,

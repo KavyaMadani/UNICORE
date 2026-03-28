@@ -1,90 +1,95 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardTitle, CardSubtitle, StatCard } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
-import { MOCK_SUBMISSIONS } from '@/lib/mock-data';
-import { FileText, ExternalLink, Check, X, Eye, Star, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { getManagerHackathons, getSubmissionsForHackathon, updateSubmissionStatus, type Hackathon, type Submission } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
+import { FileText, ExternalLink, Check, X, Eye, Star, CheckCircle, XCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 
-type SubmissionStatus = 'pending' | 'submitted' | 'reviewed' | 'disqualified';
+const STATUS_STYLES = {
+  submitted:    { bg: 'rgba(96,165,250,0.08)',  border: 'rgba(96,165,250,0.25)',  label: 'Submitted',    color: '#60a5fa' },
+  reviewed:     { bg: 'rgba(251,191,36,0.08)',  border: 'rgba(251,191,36,0.25)',  label: 'Under Review', color: '#fbbf24' },
+  approved:     { bg: 'rgba(16,185,129,0.08)',  border: 'rgba(16,185,129,0.25)',  label: 'Approved',     color: '#34d399' },
+  disqualified: { bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.25)',   label: 'Disqualified', color: '#f87171' },
+};
 
 export default function ManagerSubmissionsPage() {
-  const [submissions, setSubmissions] = useState(
-    MOCK_SUBMISSIONS.map(s => ({ ...s }))
-  );
+  const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [hackathonId, setHackathonId] = useState<string>('all');
+  const [hackathons, setHackathons] = useState<Hackathon[]>([]);
+  const [loading, setLoading] = useState(true);
   const [selectedScore, setSelectedScore] = useState<Record<string, number>>({});
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+  const [filter, setFilter] = useState<'all' | 'submitted' | 'reviewed' | 'approved'>('all');
 
-  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+  useEffect(() => {
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const uid = session?.user?.id;
+      if (uid) {
+        const hacks = await getManagerHackathons(uid);
+        setHackathons(hacks);
+        if (hacks.length > 0) {
+          const allSubs = (await Promise.all(hacks.map(h => getSubmissionsForHackathon(h.id)))).flat();
+          setSubmissions(allSubs);
+        }
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  const showToast = (msg: string, type: 'success' | 'error') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   };
 
-  const approveSubmission = (id: string, projectTitle: string) => {
-    const score = selectedScore[id] ?? 85;
-    setSubmissions(prev => prev.map(s =>
-      s.id === id ? { ...s, status: 'reviewed' as const, score, feedback: 'Approved by judge. Good work!' } : s
-    ));
-    showToast(`"${projectTitle}" approved with score ${score}/100`);
+  const handleApprove = async (subId: string, score: number) => {
+    const { error } = await updateSubmissionStatus(subId, 'approved', undefined, score);
+    if (error) { showToast('Error: ' + error, 'error'); return; }
+    setSubmissions(prev => prev.map(s => s.id === subId ? { ...s, status: 'approved', score } : s));
+    showToast('Submission approved!', 'success');
   };
 
-  const disqualifySubmission = (id: string, projectTitle: string) => {
-    setSubmissions(prev => prev.map(s =>
-      s.id === id ? { ...s, status: 'disqualified' as const, feedback: 'Disqualified by judge.' } : s
-    ));
-    showToast(`"${projectTitle}" disqualified`, 'error');
+  const handleDisqualify = async (subId: string) => {
+    const { error } = await updateSubmissionStatus(subId, 'disqualified');
+    if (error) { showToast('Error: ' + error, 'error'); return; }
+    setSubmissions(prev => prev.map(s => s.id === subId ? { ...s, status: 'disqualified' } : s));
+    showToast('Submission disqualified.', 'error');
   };
 
-  const statusCounts = {
-    total: submissions.length,
-    submitted: submissions.filter(s => s.status === 'submitted').length,
-    reviewed: submissions.filter(s => s.status === 'reviewed').length,
-    disqualified: submissions.filter(s => s.status === 'disqualified').length,
-  };
+  const filteredSubs = submissions.filter(s => {
+    const matchHack = hackathonId === 'all' || s.hackathon_id === hackathonId;
+    const matchFilter = filter === 'all' || s.status === filter;
+    return matchHack && matchFilter;
+  });
 
-  const getBadgeVariant = (status: string) => {
-    if (status === 'reviewed') return 'active';
-    if (status === 'submitted') return 'upcoming';
-    if (status === 'disqualified') return 'ended';
-    return 'draft';
-  };
+  const approved = submissions.filter(s => s.status === 'approved').length;
+  const pending = submissions.filter(s => s.status === 'submitted').length;
+  const avgScore = submissions.filter(s => s.score != null).reduce((a, s) => a + (s.score ?? 0), 0) / (submissions.filter(s => s.score != null).length || 1);
 
   return (
-    <DashboardLayout title="Submissions" subtitle="Review and manage project submissions">
+    <DashboardLayout title="Submissions" subtitle="Review and score submissions for your hackathons">
 
       {/* Toast */}
       <AnimatePresence>
         {toast && (
-          <motion.div
-            initial={{ opacity: 0, y: -16 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            style={{
-              position: 'fixed', top: 20, right: 20, zIndex: 999,
-              padding: '12px 20px', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 10,
-              background: toast.type === 'success' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
-              border: `1px solid ${toast.type === 'success' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
-              color: toast.type === 'success' ? '#34d399' : '#f87171',
-              fontSize: 13, fontWeight: 500, backdropFilter: 'blur(8px)',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
-            }}
-          >
-            {toast.type === 'success' ? <CheckCircle size={15} /> : <XCircle size={15} />}
-            {toast.msg}
+          <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+            style={{ position: 'fixed', top: 20, right: 20, zIndex: 999, padding: '11px 20px', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 8, background: toast.type === 'success' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', border: `1px solid ${toast.type === 'success' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`, color: toast.type === 'success' ? '#34d399' : '#f87171', fontSize: 13, fontWeight: 600, backdropFilter: 'blur(8px)' }}>
+            {toast.type === 'success' ? <CheckCircle size={14} /> : <XCircle size={14} />} {toast.msg}
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginBottom: 36 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 18, marginBottom: 32 }}>
         {[
-          { label: 'Total Submissions', value: statusCounts.total, icon: <FileText size={20} color="#818cf8" />, change: 'All time', dir: 'neutral' as const },
-          { label: 'Pending Review', value: statusCounts.submitted, icon: <AlertCircle size={20} color="#60a5fa" />, change: 'Awaiting review', dir: 'neutral' as const },
-          { label: 'Reviewed', value: statusCounts.reviewed, icon: <CheckCircle size={20} color="#34d399" />, change: 'Completed', dir: 'up' as const },
-          { label: 'Disqualified', value: statusCounts.disqualified, icon: <XCircle size={20} color="#f87171" />, change: 'Removed', dir: 'neutral' as const },
+          { label: 'Total Submissions', value: loading ? '—' : submissions.length, icon: <FileText size={19} className="text-indigo-400" />, change: 'All hackathons', dir: 'neutral' as const },
+          { label: 'Pending Review', value: loading ? '—' : pending, icon: <AlertCircle size={19} className="text-amber-400" />, change: 'Need attention', dir: pending > 0 ? 'up' as const : 'neutral' as const },
+          { label: 'Approved', value: loading ? '—' : approved, icon: <Check size={19} className="text-emerald-400" />, change: 'Scored & approved', dir: 'up' as const },
+          { label: 'Avg Score', value: loading ? '—' : submissions.filter(s => s.score != null).length ? `${avgScore.toFixed(1)}/10` : '—', icon: <Star size={19} className="text-blue-400" />, change: 'Out of 10', dir: 'neutral' as const },
         ].map((s, i) => (
           <motion.div key={s.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.08 }}>
             <StatCard label={s.label} value={s.value} icon={s.icon} change={s.change} changeDirection={s.dir} />
@@ -92,144 +97,87 @@ export default function ManagerSubmissionsPage() {
         ))}
       </div>
 
-      <Card>
-        <div style={{ marginBottom: 28 }}>
-          <CardTitle>All Submissions</CardTitle>
-          <CardSubtitle>Review, score, and manage submitted projects</CardSubtitle>
+      {/* Filters */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select value={hackathonId} onChange={e => setHackathonId(e.target.value)} className="input-glass" style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 9, paddingBottom: 9, width: 'auto', minWidth: 200 }}>
+          <option value="all">All Hackathons</option>
+          {hackathons.map(h => <option key={h.id} value={h.id}>{h.title}</option>)}
+        </select>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {(['all', 'submitted', 'reviewed', 'approved'] as const).map(f => (
+            <button key={f} onClick={() => setFilter(f)} style={{ padding: '8px 15px', borderRadius: 10, fontFamily: 'inherit', fontSize: 12, fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize', background: filter === f ? 'rgba(99,102,241,0.18)' : 'transparent', color: filter === f ? '#a5b4fc' : '#64748b', border: filter === f ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.07)', transition: 'all 0.15s ease' }}>{f}</button>
+          ))}
         </div>
+      </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {submissions.map((sub, i) => (
-            <motion.div
-              key={sub.id}
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.1 }}
-              style={{
-                padding: '22px 24px', borderRadius: 18,
-                background: 'rgba(255,255,255,0.025)',
-                border: sub.status === 'reviewed'
-                  ? '1px solid rgba(16,185,129,0.2)'
-                  : sub.status === 'disqualified'
-                    ? '1px solid rgba(239,68,68,0.15)'
-                    : '1px solid rgba(255,255,255,0.06)',
-              }}
-            >
-              {/* Header */}
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
-                <div>
-                  <h3 style={{ fontSize: 16, fontWeight: 700, color: '#e2e8f0', marginBottom: 6 }}>{sub.projectTitle}</h3>
-                  <p style={{ fontSize: 13, color: '#64748b' }}>
-                    by <span style={{ color: '#818cf8', fontWeight: 600 }}>{sub.teamName}</span> · {sub.hackathonTitle}
-                  </p>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-                  {sub.score !== undefined && (
-                    <div style={{
-                      textAlign: 'center', padding: '8px 16px', borderRadius: 12,
-                      background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)',
-                    }}>
-                      <div style={{ fontSize: 22, fontWeight: 900, color: '#34d399', lineHeight: 1 }}>{sub.score}</div>
-                      <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>/ 100</div>
+      {loading ? (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, gap: 12, color: '#64748b' }}>
+          <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} /> Loading submissions…
+        </div>
+      ) : filteredSubs.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '80px 0' }}>
+          <FileText size={48} style={{ margin: '0 auto 20px', opacity: 0.2 }} />
+          <p style={{ fontSize: 16, fontWeight: 700, color: '#f1f5f9', marginBottom: 8 }}>No submissions yet</p>
+          <p style={{ fontSize: 13, color: '#64748b' }}>Submissions will appear here once participants submit their projects.</p>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {filteredSubs.map((sub, i) => {
+            const cfg = STATUS_STYLES[sub.status as keyof typeof STATUS_STYLES] ?? STATUS_STYLES.submitted;
+            return (
+              <motion.div key={sub.id} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}>
+                <div style={{ padding: '24px 28px', borderRadius: 20, background: cfg.bg, border: `1px solid ${cfg.border}` }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 12 }}>
+                    <div>
+                      <h3 style={{ fontSize: 17, fontWeight: 800, color: '#f1f5f9', marginBottom: 4 }}>{sub.project_title}</h3>
+                      <p style={{ fontSize: 12, color: '#64748b' }}>{sub.hackathon_title}</p>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      {sub.score != null && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 99, background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)' }}>
+                          <Star size={12} color="#fbbf24" /><span style={{ fontSize: 13, fontWeight: 700, color: '#fbbf24' }}>{sub.score}/10</span>
+                        </div>
+                      )}
+                      <div style={{ padding: '5px 14px', borderRadius: 99, background: cfg.bg, border: `1px solid ${cfg.border}`, fontSize: 12, fontWeight: 700, color: cfg.color }}>
+                        {cfg.label}
+                      </div>
+                    </div>
+                  </div>
+                  {sub.description && <p style={{ fontSize: 14, color: '#94a3b8', lineHeight: 1.7, marginBottom: 14 }}>{sub.description}</p>}
+                  {sub.team_name && <p style={{ fontSize: 12, color: '#475569', marginBottom: 12 }}>Team: <span style={{ color: '#818cf8', fontWeight: 600 }}>{sub.team_name}</span></p>}
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                    {sub.github_url && (
+                      <a href={sub.github_url} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.09)', color: '#94a3b8', fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>
+                        GitHub
+                      </a>
+                    )}
+                    {sub.demo_url && (
+                      <a href={sub.demo_url} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 10, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', color: '#a5b4fc', fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>
+                        <ExternalLink size={12} /> Demo
+                      </a>
+                    )}
+                  </div>
+
+                  {/* Score + Action */}
+                  {sub.status === 'submitted' && (
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                      <input type="number" min="0" max="10" step="0.5" placeholder="Score (0-10)" value={selectedScore[sub.id] ?? ''} onChange={e => setSelectedScore(prev => ({ ...prev, [sub.id]: parseFloat(e.target.value) }))}
+                        className="input-glass" style={{ width: 130, paddingLeft: 12, paddingRight: 12, paddingTop: 8, paddingBottom: 8 }} />
+                      <button onClick={() => handleApprove(sub.id, selectedScore[sub.id] ?? 0)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '8px 16px', borderRadius: 10, background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.25)', color: '#34d399', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }}>
+                        <Check size={13} /> Approve
+                      </button>
+                      <button onClick={() => handleDisqualify(sub.id)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '8px 16px', borderRadius: 10, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.18)', color: '#f87171', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }}>
+                        <X size={13} /> Disqualify
+                      </button>
                     </div>
                   )}
-                  <Badge variant={getBadgeVariant(sub.status)}>{sub.status}</Badge>
+                  <p style={{ fontSize: 11, color: '#334155', marginTop: 12 }}>Submitted: {new Date(sub.submitted_at).toLocaleString()}</p>
                 </div>
-              </div>
-
-              {/* Description */}
-              <p style={{ fontSize: 14, color: '#94a3b8', lineHeight: 1.7, marginBottom: 16 }}>{sub.description}</p>
-
-              {/* Feedback */}
-              {sub.feedback && (
-                <div style={{ padding: '12px 16px', borderRadius: 12, marginBottom: 16, background: 'rgba(16,185,129,0.05)', border: '1px solid rgba(16,185,129,0.15)' }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: '#34d399' }}>Judge Feedback: </span>
-                  <span style={{ fontSize: 13, color: '#94a3b8' }}>{sub.feedback}</span>
-                </div>
-              )}
-
-              {/* Actions row */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                <a href={sub.githubUrl} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
-                  <button style={{
-                    display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 10,
-                    background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
-                    color: '#94a3b8', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
-                  }}>
-                    <ExternalLink size={12} /> GitHub
-                  </button>
-                </a>
-                {sub.demoUrl && (
-                  <a href={sub.demoUrl} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
-                    <button style={{
-                      display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 10,
-                      background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
-                      color: '#94a3b8', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
-                    }}>
-                      <Eye size={12} /> Live Demo
-                    </button>
-                  </a>
-                )}
-
-                {sub.status === 'submitted' && (
-                  <>
-                    {/* Score setter */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 10, background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.15)' }}>
-                      <Star size={12} color="#818cf8" />
-                      <span style={{ fontSize: 12, color: '#818cf8', fontWeight: 600 }}>Score:</span>
-                      <input
-                        type="number"
-                        min={0} max={100}
-                        value={selectedScore[sub.id] ?? 85}
-                        onChange={e => setSelectedScore(prev => ({ ...prev, [sub.id]: Number(e.target.value) }))}
-                        style={{
-                          width: 52, padding: '2px 6px', borderRadius: 6, fontSize: 13, fontWeight: 700,
-                          background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(99,102,241,0.2)',
-                          color: '#a5b4fc', fontFamily: 'inherit', textAlign: 'center',
-                        }}
-                      />
-                    </div>
-
-                    <button
-                      onClick={() => approveSubmission(sub.id, sub.projectTitle)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 10,
-                        background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.25)',
-                        color: '#34d399', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
-                        transition: 'all 0.15s ease',
-                      }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(16,185,129,0.2)'; }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(16,185,129,0.12)'; }}
-                    >
-                      <Check size={14} /> Approve
-                    </button>
-                    <button
-                      onClick={() => disqualifySubmission(sub.id, sub.projectTitle)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 10,
-                        background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
-                        color: '#f87171', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
-                        transition: 'all 0.15s ease',
-                      }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.15)'; }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.08)'; }}
-                    >
-                      <X size={14} /> Disqualify
-                    </button>
-                  </>
-                )}
-              </div>
-            </motion.div>
-          ))}
-
-          {submissions.length === 0 && (
-            <div style={{ textAlign: 'center', padding: '64px 0', color: '#475569' }}>
-              <FileText size={40} style={{ margin: '0 auto 16px', opacity: 0.3 }} />
-              <p style={{ fontSize: 15, fontWeight: 500 }}>No submissions yet</p>
-            </div>
-          )}
+              </motion.div>
+            );
+          })}
         </div>
-      </Card>
+      )}
     </DashboardLayout>
   );
 }

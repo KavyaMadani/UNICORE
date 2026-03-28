@@ -1,21 +1,20 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { Card, CardTitle, CardSubtitle, StatCard } from '@/components/ui/Card';
+import { StatCard } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { getAllColleges } from '@/lib/college';
-import { Building2, Plus, MapPin, Globe, Users, Check, X, Edit3, Trash2, Search } from 'lucide-react';
-import { Badge } from '@/components/ui/Badge';
+import { supabase } from '@/lib/supabase';
+import { Building2, Plus, MapPin, Globe, Search, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
-const ALL_COLLEGES = getAllColleges();
+interface College { id: string; name: string; slug: string; city: string; state: string; domain: string; website?: string; created_at?: string; }
 
 export default function ManageCollegesPage() {
   const router = useRouter();
-  const [colleges, setColleges] = useState(ALL_COLLEGES);
+  const [colleges, setColleges] = useState<College[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
@@ -23,31 +22,46 @@ export default function ManageCollegesPage() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const handleRemove = (slug: string, name: string) => {
-    setColleges(prev => prev.filter(c => c.slug !== slug));
-    showToast(`"${name}" removed successfully`);
-  };
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase.from('colleges').select('*').order('name');
+      if (!error && data) setColleges(data as College[]);
+      setLoading(false);
+    })();
+  }, []);
 
-  const handleEdit = (slug: string) => {
-    setEditingId(editingId === slug ? null : slug);
-    showToast(`Editing mode ${editingId === slug ? 'disabled' : 'enabled'} for this college`, 'success');
+  const handleDelete = async (id: string, name: string) => {
+    const { error } = await supabase.from('colleges').delete().eq('id', id);
+    if (!error) {
+      setColleges(prev => prev.filter(c => c.id !== id));
+      showToast(`"${name}" removed`);
+    } else {
+      showToast('Failed to remove: ' + error.message, 'error');
+    }
   };
 
   const filtered = colleges.filter(c =>
-    !search || c.name.toLowerCase().includes(search.toLowerCase()) || c.city.toLowerCase().includes(search.toLowerCase())
+    !search || c.name.toLowerCase().includes(search.toLowerCase()) || c.city?.toLowerCase().includes(search.toLowerCase())
   );
 
   const stats = [
-    { label: 'Total Colleges', value: colleges.length, icon: <Building2 size={20} className="text-indigo-400" /> },
-    { label: 'States Covered', value: new Set(colleges.map(c => c.state)).size, icon: <MapPin size={20} className="text-blue-400" /> },
-    { label: 'Active Organizations', value: '8', icon: <Users size={20} className="text-emerald-400" /> },
-    { label: 'Students Enrolled', value: '3.8K+', icon: <Building2 size={20} className="text-amber-400" /> },
+    { label: 'Total Colleges', value: loading ? '—' : colleges.length, icon: <Building2 size={20} color="#818cf8" />, change: 'On platform', dir: 'neutral' as const },
+    {
+      label: 'States Covered',
+      value: loading ? '—' : new Set(colleges.map(c => c.state).filter(Boolean)).size,
+      icon: <MapPin size={20} color="#60a5fa" />, change: 'Across India', dir: 'neutral' as const
+    },
+    {
+      label: 'With Websites',
+      value: loading ? '—' : colleges.filter(c => c.website).length,
+      icon: <Globe size={20} color="#34d399" />, change: 'Have website', dir: 'neutral' as const
+    },
   ];
 
   return (
     <DashboardLayout
-      title="Colleges"
-      subtitle="Manage all registered institutions"
+      title="Manage Colleges"
+      subtitle="Add and manage institutions on the platform"
       actions={
         <Button size="sm" leftIcon={<Plus size={14} />} onClick={() => router.push('/admin/colleges/add')}>
           Add College
@@ -57,137 +71,72 @@ export default function ManageCollegesPage() {
       {/* Toast */}
       <AnimatePresence>
         {toast && (
-          <motion.div
-            initial={{ opacity: 0, y: -16 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            style={{
-              position: 'fixed', top: 20, right: 20, zIndex: 999,
-              padding: '12px 20px', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 10,
-              background: toast.type === 'success' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
-              border: `1px solid ${toast.type === 'success' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
-              color: toast.type === 'success' ? '#34d399' : '#f87171',
-              fontSize: 13, fontWeight: 500, backdropFilter: 'blur(8px)',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
-            }}
-          >
-            {toast.type === 'success' ? <Check size={15} /> : <X size={15} />}
-            {toast.msg}
+          <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+            style={{ position: 'fixed', top: 20, right: 20, zIndex: 999, padding: '11px 20px', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 8, backdropFilter: 'blur(8px)', background: toast.type === 'success' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', border: `1px solid ${toast.type === 'success' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`, color: toast.type === 'success' ? '#34d399' : '#f87171', fontSize: 13, fontWeight: 600 }}>
+            {toast.type === 'success' ? <CheckCircle size={14} /> : <XCircle size={14} />} {toast.msg}
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginBottom: 36 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18, marginBottom: 32 }}>
         {stats.map((s, i) => (
           <motion.div key={s.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.08 }}>
-            <StatCard label={s.label} value={s.value} icon={s.icon} />
+            <StatCard label={s.label} value={s.value} icon={s.icon} change={s.change} changeDirection={s.dir} />
           </motion.div>
         ))}
       </div>
 
-      <Card>
-        {/* Header + Search */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 32, flexWrap: 'wrap' }}>
-          <div>
-            <CardTitle>All Colleges</CardTitle>
-            <CardSubtitle>Domain-based auto-detection is active for these institutions</CardSubtitle>
-          </div>
-          <div style={{ position: 'relative', minWidth: 240 }}>
-            <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#64748b', pointerEvents: 'none' }}>
-              <Search size={14} />
-            </span>
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search colleges..."
-              className="input-glass"
-              style={{ paddingLeft: 36, paddingRight: 14, paddingTop: 9, paddingBottom: 9, width: '100%' }}
-            />
-          </div>
+      {/* Search */}
+      <div style={{ marginBottom: 24, maxWidth: 380 }}>
+        <div style={{ position: 'relative' }}>
+          <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: '#64748b' }}><Search size={13} /></span>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or city…" className="input-glass" style={{ paddingLeft: 38, paddingRight: 14, paddingTop: 10, paddingBottom: 10, width: '100%' }} />
         </div>
+      </div>
 
-        {/* Grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+      {loading ? (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, gap: 12, color: '#64748b' }}>
+          <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} /> Loading colleges…
+        </div>
+      ) : filtered.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '80px 0' }}>
+          <Building2 size={48} style={{ margin: '0 auto 20px', opacity: 0.2 }} />
+          <p style={{ fontSize: 16, fontWeight: 700, color: '#f1f5f9', marginBottom: 8 }}>{search ? 'No colleges match your search' : 'No colleges yet'}</p>
+          <p style={{ fontSize: 13, color: '#64748b', marginBottom: 24 }}>Add institutions to help students identify themselves.</p>
+          {!search && <Button leftIcon={<Plus size={14} />} onClick={() => router.push('/admin/colleges/add')}>Add College</Button>}
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 18 }}>
           {filtered.map((college, i) => (
-            <motion.div
-              key={college.slug}
-              initial={{ opacity: 0, scale: 0.97 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: i * 0.04 }}
-              style={{
-                padding: '20px 22px',
-                borderRadius: 16,
-                background: editingId === college.slug ? 'rgba(99,102,241,0.08)' : 'rgba(255,255,255,0.025)',
-                border: editingId === college.slug ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.07)',
-                transition: 'all 0.2s ease',
-              }}
-            >
-              {/* Top row */}
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
-                <div style={{
-                  width: 44, height: 44, borderRadius: 13,
-                  background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(59,130,246,0.15))',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  border: '1px solid rgba(99,102,241,0.15)',
-                }}>
-                  <Building2 size={19} color="#818cf8" />
+            <motion.div key={college.id} initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.06 }}>
+              <div style={{ padding: '22px 24px', borderRadius: 20, background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 14 }}>
+                  <div style={{ width: 44, height: 44, borderRadius: 13, flexShrink: 0, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Building2 size={20} color="#818cf8" />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <h3 style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{college.name}</h3>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <MapPin size={11} color="#64748b" />
+                      <span style={{ fontSize: 12, color: '#64748b' }}>{college.city}{college.state ? `, ${college.state}` : ''}</span>
+                    </div>
+                  </div>
                 </div>
-                <Badge variant="active" dot>active</Badge>
-              </div>
-
-              {/* Info */}
-              <h3 style={{ fontSize: 15, fontWeight: 700, color: '#e2e8f0', marginBottom: 6, lineHeight: 1.3 }}>{college.name}</h3>
-              <p style={{ fontSize: 13, color: '#64748b', marginBottom: 8 }}>{college.city}, {college.state}</p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#475569', marginBottom: 18 }}>
-                <Globe size={11} />
-                <span style={{ fontFamily: 'monospace' }}>{college.domain}</span>
-              </div>
-
-              {/* Actions */}
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button
-                  onClick={() => handleEdit(college.slug)}
-                  style={{
-                    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                    padding: '9px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
-                    background: editingId === college.slug ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.04)',
-                    border: editingId === college.slug ? '1px solid rgba(99,102,241,0.35)' : '1px solid rgba(255,255,255,0.08)',
-                    color: editingId === college.slug ? '#a5b4fc' : '#94a3b8',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  {editingId === college.slug ? <Check size={13} /> : <Edit3 size={13} />}
-                  {editingId === college.slug ? 'Done' : 'Edit'}
-                </button>
-                <button
-                  onClick={() => handleRemove(college.slug, college.name)}
-                  style={{
-                    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                    padding: '9px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
-                    background: 'rgba(239,68,68,0.07)',
-                    border: '1px solid rgba(239,68,68,0.15)',
-                    color: '#f87171',
-                    transition: 'all 0.15s ease',
-                  }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.15)'; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.07)'; }}
-                >
-                  <Trash2 size={13} /> Remove
+                {college.domain && <p style={{ fontSize: 11, color: '#475569', marginBottom: 12 }}>@{college.domain}</p>}
+                {college.website && (
+                  <a href={college.website} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#60a5fa', textDecoration: 'none', marginBottom: 12 }}>
+                    <Globe size={10} /> {college.website.replace('https://', '')}
+                  </a>
+                )}
+                <button onClick={() => handleDelete(college.id, college.name)} style={{ fontSize: 12, color: '#f87171', background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 }}>
+                  Remove
                 </button>
               </div>
             </motion.div>
           ))}
         </div>
-
-        {filtered.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '64px 0', color: '#475569' }}>
-            <Building2 size={40} style={{ margin: '0 auto 16px', opacity: 0.3 }} />
-            <p style={{ fontSize: 15, fontWeight: 500 }}>No colleges found</p>
-            <p style={{ fontSize: 13, marginTop: 6 }}>Try a different search term</p>
-          </div>
-        )}
-      </Card>
+      )}
     </DashboardLayout>
   );
 }

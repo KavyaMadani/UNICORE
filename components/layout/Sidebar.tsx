@@ -34,8 +34,9 @@ function getNavSections(role: UserRole): NavSection[] {
         {
           title: 'Management',
           items: [
+            { label: 'Users', href: '/admin/users', icon: <Users size={18} /> },
             { label: 'Colleges', href: '/admin/colleges', icon: <Building2 size={18} /> },
-            { label: 'Organizations', href: '/admin/organizations', icon: <Users size={18} /> },
+            { label: 'Organizers', href: '/admin/organizations', icon: <Users size={18} /> },
           ],
         },
         {
@@ -45,6 +46,7 @@ function getNavSections(role: UserRole): NavSection[] {
           ],
         },
       ];
+
     case 'organization':
       return [
         {

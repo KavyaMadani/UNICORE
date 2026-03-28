@@ -1,10 +1,11 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/context/AuthProvider';
 import { signUpStudent } from '@/lib/auth';
-import { Zap, Eye, EyeOff, ArrowRight, CheckCircle, AlertCircle } from 'lucide-react';
+import { getDomainFromEmail } from '@/lib/college-detect';
+import { Zap, Eye, EyeOff, ArrowRight, CheckCircle, AlertCircle, School } from 'lucide-react';
 import Link from 'next/link';
 
 const PERKS = [
@@ -26,27 +27,40 @@ export default function SignUpPage() {
   const [loading, setLoading] = useState(false);
   const [serverError, setServerError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [detectedCollege, setDetectedCollege] = useState('');
+  const [detectingCollege, setDetectingCollege] = useState(false);
 
   useEffect(() => {
     if (user) router.push('/student/dashboard');
   }, [user, router]);
 
+  // Live college detection as user types email
+  const detectCollege = useCallback(async (emailVal: string) => {
+    const domain = getDomainFromEmail(emailVal);
+    if (!domain || !domain.includes('.')) { setDetectedCollege(''); return; }
+    setDetectingCollege(true);
+    try {
+      const { detectCollegeFromEmail } = await import('@/lib/college-detect');
+      const result = await detectCollegeFromEmail(emailVal);
+      setDetectedCollege(result.college ?? '');
+    } catch { setDetectedCollege(''); }
+    setDetectingCollege(false);
+  }, []);
+
+  // Debounce email changes
+  useEffect(() => {
+    if (!email.includes('@')) { setDetectedCollege(''); return; }
+    const t = setTimeout(() => detectCollege(email), 600);
+    return () => clearTimeout(t);
+  }, [email, detectCollege]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setServerError('');
 
-    if (!name.trim() || !email.trim() || !password) {
-      setServerError('All fields are required.');
-      return;
-    }
-    if (password.length < 6) {
-      setServerError('Password must be at least 6 characters.');
-      return;
-    }
-    if (password !== confirmPassword) {
-      setServerError('Passwords do not match.');
-      return;
-    }
+    if (!name.trim() || !email.trim() || !password) { setServerError('All fields are required.'); return; }
+    if (password.length < 6) { setServerError('Password must be at least 6 characters.'); return; }
+    if (password !== confirmPassword) { setServerError('Passwords do not match.'); return; }
 
     setLoading(true);
     try {
@@ -63,18 +77,12 @@ export default function SignUpPage() {
   };
 
   const inputStyle: React.CSSProperties = {
-    width: '100%',
-    background: 'rgba(9,13,25,0.8)',
-    border: '1px solid rgba(99,102,241,0.15)',
-    color: '#f1f5f9',
-    fontSize: '0.875rem',
-    lineHeight: 1.5,
-    borderRadius: '0.75rem',
-    padding: '0.6875rem 1rem',
-    outline: 'none',
-    fontFamily: 'inherit',
+    width: '100%', background: 'rgba(9,13,25,0.8)', border: '1px solid rgba(99,102,241,0.15)',
+    color: '#f1f5f9', fontSize: '0.875rem', lineHeight: 1.5, borderRadius: '0.75rem',
+    padding: '0.6875rem 1rem', outline: 'none', fontFamily: 'inherit',
     transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
   };
+
 
   return (
     <div
@@ -178,12 +186,25 @@ export default function SignUpPage() {
                     autoComplete="email"
                     value={email}
                     onChange={e => setEmail(e.target.value)}
-                    placeholder="you@college.ac.in"
+                    placeholder="you@charusat.edu.in"
                     style={inputStyle}
                     onFocus={e => { e.target.style.borderColor = 'rgba(99,102,241,0.55)'; e.target.style.boxShadow = '0 0 0 3px rgba(99,102,241,0.1)'; }}
                     onBlur={e => { e.target.style.borderColor = 'rgba(99,102,241,0.15)'; e.target.style.boxShadow = 'none'; }}
                   />
+                  {/* Live college detection */}
+                  {detectingCollege && (
+                    <p style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>🔍 Detecting your college…</p>
+                  )}
+                  {!detectingCollege && detectedCollege && (
+                    <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 7, padding: '6px 12px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                      <School size={13} color="#818cf8" />
+                      <span style={{ fontSize: 12, color: '#a5b4fc', fontWeight: 600 }}>Detected: {detectedCollege}</span>
+                      <span style={{ fontSize: 11, color: '#475569', marginLeft: 'auto' }}>✓ You&apos;ll be registered as a student of this college</span>
+                    </motion.div>
+                  )}
                 </div>
+
 
                 <div>
                   <label className="block text-sm font-medium mb-1.5" style={{ color: '#cbd5e1' }}>Password</label>

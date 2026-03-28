@@ -2,7 +2,8 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { getProfile, getDashboardForRole, signOut as authSignOut } from '@/lib/auth';
-import { getRoleFromEmail } from '@/lib/role-guard';
+import { getRoleFromProfile } from '@/lib/role-guard';
+
 import type { AppUser, UserRole } from '@/lib/auth';
 import { useRouter, usePathname } from 'next/navigation';
 
@@ -30,27 +31,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   /**
    * Build an AppUser from a Supabase Auth user.
-   * Role is ALWAYS derived from the email (not DB) to bypass RLS recursion.
+   * Role is read from DB profile first, then admin email override.
    */
   const buildUserFromAuth = useCallback(async (authUser: { id: string; email?: string; user_metadata?: Record<string, string> }): Promise<AppUser> => {
     const email = authUser.email ?? '';
-    const role: UserRole = getRoleFromEmail(email);
     const metaName = authUser.user_metadata?.name ?? authUser.user_metadata?.full_name;
     const fallbackName = email.split('@')[0];
 
-    // Try to get extra fields from DB (may fail due to RLS — that's OK)
+    // Always get profile from DB — role MUST come from DB for org/manager
     const dbProfile = await getProfile(authUser.id);
+
+    // Derive role: admin email overrides, otherwise use DB role
+    const role: UserRole = getRoleFromProfile(email, dbProfile?.role);
 
     return {
       id: authUser.id,
       email,
       name: dbProfile?.name ?? metaName ?? fallbackName,
-      role, // Always from email — never trusts DB role
+      role,
       college: dbProfile?.college,
       organizationId: dbProfile?.organizationId,
       avatarUrl: dbProfile?.avatarUrl,
     };
   }, []);
+
 
   const loadUser = useCallback(async (authUser: { id: string; email?: string; user_metadata?: Record<string, string> }) => {
     try {

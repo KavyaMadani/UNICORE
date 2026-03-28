@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { AuthProvider } from '@/context/AuthProvider';
+import BrandSignature from '@/components/global/BrandSignature';
 
 export const metadata: Metadata = {
   title: 'HackForge — Premium Hackathon Management Platform',
@@ -26,7 +27,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <AuthProvider>{children}</AuthProvider>
+        <BrandSignature />
       </body>
     </html>
   );
 }
+
