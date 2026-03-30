@@ -98,12 +98,19 @@ export interface Database {
         Row: {
           id: string;
           hackathon_id: string;
-          team_id: string;
+          hackathon_title: string;
+          user_id: string;
+          team_id: string | null;
+          team_name: string | null;
           project_title: string;
-          description: string;
-          github_url: string;
+          description: string | null;
+          github_url: string | null;
           demo_url: string | null;
-          status: 'draft' | 'submitted' | 'reviewed' | 'disqualified';
+          file_url: string | null;
+          file_name: string | null;
+          file_size: number | null;
+          submission_data: Record<string, string> | null;
+          status: 'submitted' | 'reviewed' | 'approved' | 'disqualified';
           score: number | null;
           feedback: string | null;
           submitted_at: string;
@@ -112,6 +119,7 @@ export interface Database {
         Insert: Omit<Database['public']['Tables']['submissions']['Row'], 'id' | 'submitted_at' | 'updated_at'> & { id?: string };
         Update: Partial<Database['public']['Tables']['submissions']['Insert']>;
       };
+
       announcements: {
         Row: {
           id: string;

@@ -10,27 +10,25 @@ import { Input, Textarea, Select } from '@/components/ui/Input';
 import { getHackathonById, updateHackathon, type Hackathon } from '@/lib/db';
 import {
   ArrowLeft, Zap, Save, CheckCircle, Calendar, Info, Tag, Eye, Loader2,
+  Upload, FileCode2, FileText, Globe, Film, Package, Presentation,
 } from 'lucide-react';
 
 interface EditForm {
-  title: string;
-  subtitle: string;
-  description: string;
-  college: string;
-  organizer: string;
-  tags: string;
-  status: string;
-  prize_pool: string;
-  min_team_size: string;
-  max_team_size: string;
-  registration_deadline: string;
-  start_date: string;
-  end_date: string;
-  rules: string;
-  first_prize: string;
-  second_prize: string;
-  third_prize: string;
+  title: string; subtitle: string; description: string;
+  college: string; organizer: string; tags: string; status: string;
+  prize_pool: string; min_team_size: string; max_team_size: string;
+  registration_deadline: string; start_date: string; end_date: string;
+  rules: string; first_prize: string; second_prize: string; third_prize: string;
 }
+
+const SUBMISSION_TYPES = [
+  { id: 'github',  label: 'GitHub Repo',    icon: <FileCode2 size={15} />,    desc: 'Public GitHub link' },
+  { id: 'pdf',     label: 'PDF Document',   icon: <FileText size={15} />,     desc: 'PDF report / doc' },
+  { id: 'ppt',     label: 'PPT / Slides',   icon: <Presentation size={15} />, desc: 'PowerPoint deck' },
+  { id: 'website', label: 'Website URL',    icon: <Globe size={15} />,        desc: 'Live demo link' },
+  { id: 'video',   label: 'Video Demo',     icon: <Film size={15} />,         desc: 'MP4 / video file' },
+  { id: 'zip',     label: 'ZIP Archive',    icon: <Package size={15} />,      desc: 'Compressed code' },
+];
 
 export default function EditHackathonPage() {
   const { id } = useParams();
@@ -39,6 +37,7 @@ export default function EditHackathonPage() {
   const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
 
   const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<EditForm>();
 
@@ -48,29 +47,26 @@ export default function EditHackathonPage() {
       if (data) {
         const prizes = Array.isArray(data.prizes) ? data.prizes : [];
         const rules = Array.isArray(data.rules) ? data.rules : [];
+        setSelectedTypes(Array.isArray(data.submission_types) ? data.submission_types : []);
         reset({
-          title: data.title ?? '',
-          subtitle: data.subtitle ?? '',
-          description: data.description ?? '',
-          college: data.college ?? '',
-          organizer: data.organizer ?? '',
-          tags: (data.tags ?? []).join(', '),
-          status: data.status ?? 'upcoming',
-          prize_pool: data.prize_pool ?? '',
-          min_team_size: String(data.min_team_size ?? 2),
-          max_team_size: String(data.max_team_size ?? 4),
+          title: data.title ?? '', subtitle: data.subtitle ?? '',
+          description: data.description ?? '', college: data.college ?? '',
+          organizer: data.organizer ?? '', tags: (data.tags ?? []).join(', '),
+          status: data.status ?? 'upcoming', prize_pool: data.prize_pool ?? '',
+          min_team_size: String(data.min_team_size ?? 2), max_team_size: String(data.max_team_size ?? 4),
           registration_deadline: data.registration_deadline?.slice(0, 16) ?? '',
           start_date: data.start_date?.slice(0, 16) ?? '',
           end_date: data.end_date?.slice(0, 16) ?? '',
-          rules: rules.join('\n'),
-          first_prize: prizes[0]?.amount ?? '',
-          second_prize: prizes[1]?.amount ?? '',
-          third_prize: prizes[2]?.amount ?? '',
+          rules: rules.join('\n'), first_prize: prizes[0]?.amount ?? '',
+          second_prize: prizes[1]?.amount ?? '', third_prize: prizes[2]?.amount ?? '',
         });
       }
       setLoading(false);
     });
   }, [id, reset]);
+
+  const toggleType = (tid: string) =>
+    setSelectedTypes(prev => prev.includes(tid) ? prev.filter(t => t !== tid) : [...prev, tid]);
 
   const onSubmit = async (data: EditForm) => {
     setSaveError(null);
@@ -81,51 +77,40 @@ export default function EditHackathonPage() {
       { rank: '2nd Place', amount: data.second_prize || '—', description: 'Runner up' },
       { rank: '3rd Place', amount: data.third_prize || '—', description: '2nd runner up' },
     ];
-
     const { error } = await updateHackathon(id as string, {
-      title: data.title,
-      subtitle: data.subtitle,
-      description: data.description,
-      college: data.college,
-      organizer: data.organizer,
-      tags,
-      rules,
-      prizes,
+      title: data.title, subtitle: data.subtitle, description: data.description,
+      college: data.college, organizer: data.organizer, tags, rules, prizes,
       status: data.status as Hackathon['status'],
       prize_pool: data.prize_pool || data.first_prize || 'TBD',
       min_team_size: parseInt(data.min_team_size, 10),
       max_team_size: parseInt(data.max_team_size, 10),
+      submission_types: selectedTypes,
       registration_deadline: data.registration_deadline ? new Date(data.registration_deadline).toISOString() : undefined,
       start_date: data.start_date ? new Date(data.start_date).toISOString() : undefined,
       end_date: data.end_date ? new Date(data.end_date).toISOString() : undefined,
     });
-
     if (error) { setSaveError(error); return; }
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };
 
-  if (loading) {
-    return (
-      <DashboardLayout title="Loading…" subtitle="">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300, gap: 12, color: '#64748b' }}>
-          <Loader2 size={22} style={{ animation: 'spin 1s linear infinite' }} /> Loading hackathon…
-        </div>
-      </DashboardLayout>
-    );
-  }
+  if (loading) return (
+    <DashboardLayout title="Loading…" subtitle="">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300, gap: 12, color: '#64748b' }}>
+        <Loader2 size={22} style={{ animation: 'spin 1s linear infinite' }} /> Loading hackathon…
+      </div>
+    </DashboardLayout>
+  );
 
-  if (!hack) {
-    return (
-      <DashboardLayout title="Not Found" subtitle="">
-        <div style={{ textAlign: 'center', padding: '80px 0' }}>
-          <Zap size={48} style={{ margin: '0 auto 20px', opacity: 0.2 }} />
-          <p style={{ fontSize: 16, color: '#64748b', marginBottom: 24 }}>Hackathon not found or you don't have access.</p>
-          <Button leftIcon={<ArrowLeft size={14} />} onClick={() => router.push('/manager/hackathons')}>Back</Button>
-        </div>
-      </DashboardLayout>
-    );
-  }
+  if (!hack) return (
+    <DashboardLayout title="Not Found" subtitle="">
+      <div style={{ textAlign: 'center', padding: '80px 0' }}>
+        <Zap size={48} style={{ margin: '0 auto 20px', opacity: 0.2 }} />
+        <p style={{ fontSize: 16, color: '#64748b', marginBottom: 24 }}>Hackathon not found or you don&apos;t have access.</p>
+        <Button leftIcon={<ArrowLeft size={14} />} onClick={() => router.push('/manager/hackathons')}>Back</Button>
+      </div>
+    </DashboardLayout>
+  );
 
   return (
     <DashboardLayout
@@ -142,7 +127,7 @@ export default function EditHackathonPage() {
       {saved && (
         <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
           style={{ position: 'fixed', top: 20, right: 20, zIndex: 999, padding: '12px 20px', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', color: '#34d399', fontSize: 13, fontWeight: 600, backdropFilter: 'blur(8px)', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
-          <CheckCircle size={15} /> Saved to database! Students see the updated version.
+          <CheckCircle size={15} /> Saved! Students will see the updated version.
         </motion.div>
       )}
       {saveError && (
@@ -180,12 +165,12 @@ export default function EditHackathonPage() {
             <Card>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28 }}>
                 <div style={{ width: 42, height: 42, borderRadius: 13, background: 'rgba(16,185,129,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Calendar size={18} color="#34d399" /></div>
-                <div><CardTitle>Schedule</CardTitle><CardSubtitle>Key dates</CardSubtitle></div>
+                <div><CardTitle>Schedule</CardTitle><CardSubtitle>Key dates — students see these in the hackathon detail</CardSubtitle></div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
                 <Input id="e-reg" label="Registration Deadline" type="datetime-local" {...register('registration_deadline')} />
-                <Input id="e-start" label="Start Date" type="datetime-local" {...register('start_date')} />
-                <Input id="e-end" label="End Date" type="datetime-local" {...register('end_date')} />
+                <Input id="e-start" label="Start Date & Time" type="datetime-local" {...register('start_date')} />
+                <Input id="e-end" label="End Date & Time" type="datetime-local" {...register('end_date')} />
               </div>
             </Card>
 
@@ -193,7 +178,7 @@ export default function EditHackathonPage() {
             <Card>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28 }}>
                 <div style={{ width: 42, height: 42, borderRadius: 13, background: 'rgba(251,191,36,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Tag size={18} color="#fbbf24" /></div>
-                <div><CardTitle>Teams & Prizes</CardTitle><CardSubtitle>Team size and rewards</CardSubtitle></div>
+                <div><CardTitle>Teams &amp; Prizes</CardTitle><CardSubtitle>Team size and reward structure</CardSubtitle></div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: 16 }}>
                 <Input id="e-min" label="Min Team" type="number" {...register('min_team_size')} />
@@ -204,10 +189,40 @@ export default function EditHackathonPage() {
               </div>
             </Card>
 
+            {/* Submission Types */}
+            <Card>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+                <div style={{ width: 42, height: 42, borderRadius: 13, background: 'rgba(99,102,241,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Upload size={18} color="#818cf8" /></div>
+                <div><CardTitle>Accepted Submission Types</CardTitle><CardSubtitle>What participants must submit — shown during the event</CardSubtitle></div>
+              </div>
+              <p style={{ fontSize: 12, color: '#475569', marginBottom: 18 }}>Select all that apply. Students will only see these fields in their submission form.</p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                {SUBMISSION_TYPES.map(type => {
+                  const sel = selectedTypes.includes(type.id);
+                  return (
+                    <button key={type.id} type="button" onClick={() => toggleType(type.id)}
+                      style={{ padding: '14px 16px', borderRadius: 14, border: `1.5px solid ${sel ? 'rgba(99,102,241,0.5)' : 'rgba(255,255,255,0.08)'}`, background: sel ? 'rgba(99,102,241,0.1)' : 'rgba(255,255,255,0.02)', cursor: 'pointer', textAlign: 'left', transition: 'all 0.15s', position: 'relative' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <span style={{ color: sel ? '#818cf8' : '#64748b', transition: 'color 0.15s' }}>{type.icon}</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: sel ? '#c7d2fe' : '#94a3b8' }}>{type.label}</span>
+                        {sel && <CheckCircle size={12} color="#818cf8" style={{ marginLeft: 'auto' }} />}
+                      </div>
+                      <p style={{ fontSize: 11, color: '#475569' }}>{type.desc}</p>
+                    </button>
+                  );
+                })}
+              </div>
+              {selectedTypes.length > 0 && (
+                <div style={{ marginTop: 12, padding: '9px 14px', borderRadius: 10, background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.2)' }}>
+                  <p style={{ fontSize: 12, color: '#34d399' }}>✓ Selected: {selectedTypes.map(id => SUBMISSION_TYPES.find(t => t.id === id)?.label).filter(Boolean).join(', ')}</p>
+                </div>
+              )}
+            </Card>
+
             {/* Rules */}
             <Card>
-              <div style={{ marginBottom: 20 }}><CardTitle>Rules</CardTitle><CardSubtitle>One rule per line</CardSubtitle></div>
-              <Textarea id="e-rules" label="Rules" rows={5} placeholder="Rule 1&#10;Rule 2&#10;Rule 3" {...register('rules')} />
+              <div style={{ marginBottom: 20 }}><CardTitle>Rules</CardTitle><CardSubtitle>One rule per line — displayed to students</CardSubtitle></div>
+              <Textarea id="e-rules" label="Rules" rows={5} placeholder={'Rule 1\nRule 2\nRule 3'} {...register('rules')} />
             </Card>
 
             {/* Submit */}
@@ -218,6 +233,7 @@ export default function EditHackathonPage() {
           </div>
         </form>
       </motion.div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </DashboardLayout>
   );
 }

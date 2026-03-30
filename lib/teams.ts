@@ -1,6 +1,5 @@
 /**
- * Team management DB layer.
- * All team operations go through here.
+ * Team management DB layer — extended with leader controls.
  */
 import { supabase } from './supabase';
 
@@ -49,7 +48,6 @@ export async function getTeamsForHackathon(hackathonId: string): Promise<Team[]>
 
   if (error) { console.error('[getTeamsForHackathon]', error.message); return []; }
 
-  // Get member counts
   const teamIds = (teams ?? []).map(t => t.id);
   if (teamIds.length === 0) return [];
 
@@ -63,7 +61,7 @@ export async function getTeamsForHackathon(hackathonId: string): Promise<Team[]>
 
   return (teams ?? []).map(t => ({
     ...t,
-    leader: (t as {profiles?: {name: string; email: string}}).profiles ?? { name: 'Unknown', email: '' },
+    leader: (t as { profiles?: { name: string; email: string } }).profiles ?? { name: 'Unknown', email: '' },
     member_count: countMap[t.id] ?? 0,
     is_full: (countMap[t.id] ?? 0) >= t.max_size,
   }));
@@ -80,13 +78,12 @@ export async function getTeamMembers(teamId: string): Promise<TeamMember[]> {
   if (error) { console.error('[getTeamMembers]', error.message); return []; }
   return (data ?? []).map(m => ({
     ...m,
-    profile: (m as {profiles?: {name: string; email: string; college: string}}).profiles,
+    profile: (m as { profiles?: { name: string; email: string; college: string } }).profiles,
   }));
 }
 
 /** Get the team a user is on for a hackathon (null if not on any team) */
 export async function getUserTeam(hackathonId: string, userId: string): Promise<Team | null> {
-  // Find team memberships for this user
   const { data: memberships } = await supabase
     .from('team_members')
     .select('team_id')
@@ -112,7 +109,6 @@ export async function createTeam(
   teamName: string,
   maxSize: number
 ): Promise<{ team: Team | null; error: string | null }> {
-  // 1. Create registration for leader
   const { error: regErr } = await supabase.from('registrations').upsert(
     [{ user_id: leaderId, hackathon_id: hackathonId, team_name: teamName }],
     { onConflict: 'user_id,hackathon_id' }
@@ -121,7 +117,6 @@ export async function createTeam(
     return { team: null, error: regErr.message };
   }
 
-  // 2. Create team
   const { data: team, error: teamErr } = await supabase
     .from('teams')
     .insert([{ hackathon_id: hackathonId, name: teamName, leader_id: leaderId, max_size: maxSize }])
@@ -130,12 +125,68 @@ export async function createTeam(
 
   if (teamErr) return { team: null, error: teamErr.message };
 
-  // 3. Add leader as first member
   await supabase.from('team_members').insert([{
     team_id: team.id, user_id: leaderId, role: 'leader'
   }]);
 
   return { team: team as Team, error: null };
+}
+
+/** Update team name (leader only) */
+export async function updateTeamName(
+  teamId: string,
+  newName: string
+): Promise<{ error: string | null }> {
+  const { error } = await supabase
+    .from('teams')
+    .update({ name: newName.trim() })
+    .eq('id', teamId);
+  return { error: error?.message ?? null };
+}
+
+/** Remove a member from a team (leader action) */
+export async function removeMember(
+  teamMemberId: string,
+  userId: string,
+  hackathonId: string
+): Promise<{ error: string | null }> {
+  // Remove from team_members
+  const { error } = await supabase
+    .from('team_members')
+    .delete()
+    .eq('id', teamMemberId);
+
+  if (error) return { error: error.message };
+
+  // Also remove their registration so they can re-register if they want
+  await supabase.from('registrations')
+    .delete()
+    .eq('user_id', userId)
+    .eq('hackathon_id', hackathonId);
+
+  return { error: null };
+}
+
+/** Leave a team (member self-action) */
+export async function leaveTeam(
+  teamId: string,
+  userId: string,
+  hackathonId: string
+): Promise<{ error: string | null }> {
+  const { error } = await supabase
+    .from('team_members')
+    .delete()
+    .eq('team_id', teamId)
+    .eq('user_id', userId);
+
+  if (error) return { error: error.message };
+
+  await supabase.from('registrations')
+    .delete()
+    .eq('user_id', userId)
+    .eq('hackathon_id', hackathonId);
+
+  return { error: null };
 }
 
 /** Send a join request to a team */
@@ -144,7 +195,6 @@ export async function sendJoinRequest(
   userId: string,
   message?: string
 ): Promise<{ error: string | null }> {
-  // Check if already requested
   const { data: existing } = await supabase
     .from('team_requests')
     .select('id, status')
@@ -166,6 +216,21 @@ export async function sendJoinRequest(
   return { error: error?.message ?? null };
 }
 
+/** Withdraw a pending join request */
+export async function withdrawJoinRequest(
+  teamId: string,
+  userId: string
+): Promise<{ error: string | null }> {
+  const { error } = await supabase
+    .from('team_requests')
+    .delete()
+    .eq('team_id', teamId)
+    .eq('user_id', userId)
+    .eq('type', 'join_request')
+    .eq('status', 'pending');
+  return { error: error?.message ?? null };
+}
+
 /** Send email invites to teammates (leader action) */
 export async function sendInvites(
   teamId: string,
@@ -183,7 +248,6 @@ export async function sendInvites(
 
 /** Get pending join requests for all teams that this user leads */
 export async function getJoinRequestsForLeader(leaderId: string, hackathonId: string): Promise<TeamRequest[]> {
-  // Get leader's teams for this hackathon
   const { data: myTeams } = await supabase
     .from('teams')
     .select('id')
@@ -198,13 +262,14 @@ export async function getJoinRequestsForLeader(leaderId: string, hackathonId: st
     .select('*, teams(name, hackathon_id), profiles!team_requests_user_id_fkey(name, email)')
     .in('team_id', teamIds)
     .eq('type', 'join_request')
-    .eq('status', 'pending');
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false });
 
   if (error) { console.error('[getJoinRequestsForLeader]', error.message); return []; }
   return (data ?? []).map(r => ({
     ...r,
-    team: (r as {teams?: {name: string; hackathon_id: string}}).teams,
-    requester: (r as {profiles?: {name: string; email: string}}).profiles,
+    team: (r as { teams?: { name: string; hackathon_id: string } }).teams,
+    requester: (r as { profiles?: { name: string; email: string } }).profiles,
   })) as TeamRequest[];
 }
 
@@ -220,7 +285,7 @@ export async function getInvitesForUser(email: string): Promise<TeamRequest[]> {
   if (error) { console.error('[getInvitesForUser]', error.message); return []; }
   return (data ?? []).map(r => ({
     ...r,
-    team: (r as {teams?: {name: string; hackathon_id: string}}).teams,
+    team: (r as { teams?: { name: string; hackathon_id: string } }).teams,
   })) as TeamRequest[];
 }
 
@@ -231,16 +296,23 @@ export async function acceptJoinRequest(
   hackathonId: string,
   userId: string
 ): Promise<{ error: string | null }> {
-  // 1. Mark request accepted
+  // Check team is not full
+  const { data: members } = await supabase
+    .from('team_members')
+    .select('id')
+    .eq('team_id', teamId);
+  const { data: team } = await supabase.from('teams').select('max_size').eq('id', teamId).single();
+  if (team && members && members.length >= team.max_size) {
+    return { error: 'Team is full. Cannot accept more members.' };
+  }
+
   await supabase.from('team_requests').update({ status: 'accepted' }).eq('id', requestId);
 
-  // 2. Register the user
   await supabase.from('registrations').upsert(
     [{ user_id: userId, hackathon_id: hackathonId }],
     { onConflict: 'user_id,hackathon_id' }
   );
 
-  // 3. Add to team members
   const { error } = await supabase.from('team_members').insert([{
     team_id: teamId, user_id: userId, role: 'member'
   }]);
@@ -285,6 +357,28 @@ export async function getUserRequestStatus(
     .eq('team_id', teamId)
     .eq('user_id', userId)
     .eq('type', 'join_request')
+    .order('created_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
   return (data?.status as 'pending' | 'accepted' | 'declined') ?? 'none';
+}
+
+/** Get all join requests made BY a user (to check which teams they requested) */
+export async function getMyJoinRequests(
+  userId: string,
+  hackathonId: string
+): Promise<TeamRequest[]> {
+  const { data, error } = await supabase
+    .from('team_requests')
+    .select('*, teams!inner(name, hackathon_id)')
+    .eq('user_id', userId)
+    .eq('type', 'join_request')
+    .eq('teams.hackathon_id', hackathonId)
+    .order('created_at', { ascending: false });
+
+  if (error) { console.error('[getMyJoinRequests]', error.message); return []; }
+  return (data ?? []).map(r => ({
+    ...r,
+    team: (r as { teams?: { name: string; hackathon_id: string } }).teams,
+  })) as TeamRequest[];
 }

@@ -9,8 +9,18 @@ import { getHackathonById, type Hackathon } from '@/lib/db';
 import {
   ArrowLeft, Zap, Users, Trophy, Calendar, School, Tag,
   CheckCircle, Clock, Edit3, BarChart2, FileText, Loader2,
+  Upload, ExternalLink,
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
+
+const SUBMISSION_TYPE_META: Record<string, { icon: string; label: string }> = {
+  github:  { icon: '🔗', label: 'GitHub Repository' },
+  pdf:     { icon: '📄', label: 'PDF Document' },
+  ppt:     { icon: '📊', label: 'Presentation' },
+  website: { icon: '🌐', label: 'Website / Demo URL' },
+  video:   { icon: '🎥', label: 'Video Demo' },
+  zip:     { icon: '📦', label: 'ZIP Archive' },
+};
 
 export default function HackathonDetailPage() {
   const { id } = useParams();
@@ -51,6 +61,7 @@ export default function HackathonDetailPage() {
   const timeline: { label: string; date: string; done: boolean }[] = Array.isArray(hack.timeline) ? hack.timeline : [];
   const rules: string[] = Array.isArray(hack.rules) ? hack.rules : [];
   const tags: string[] = Array.isArray(hack.tags) ? hack.tags : [];
+  const submissionTypes: string[] = Array.isArray(hack.submission_types) ? hack.submission_types : [];
 
   return (
     <DashboardLayout
@@ -59,6 +70,7 @@ export default function HackathonDetailPage() {
       actions={
         <div style={{ display: 'flex', gap: 10 }}>
           <Button variant="secondary" size="sm" leftIcon={<ArrowLeft size={14} />} onClick={() => router.push('/manager/hackathons')}>Back</Button>
+          <Button variant="secondary" size="sm" leftIcon={<Upload size={14} />} onClick={() => router.push('/manager/submissions')}>View Submissions</Button>
           <Button size="sm" leftIcon={<Edit3 size={14} />} onClick={() => router.push(`/manager/hackathons/${hack.id}/edit`)}>Edit</Button>
         </div>
       }
@@ -120,6 +132,49 @@ export default function HackathonDetailPage() {
             </motion.div>
           ))}
         </div>
+
+        {/* Submission Types Panel */}
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}>
+          <div style={{ padding: '28px 32px', borderRadius: 22, background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Upload size={18} color="#818cf8" />
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: '#f1f5f9' }}>Required Submissions</h3>
+                <span style={{ fontSize: 11, color: '#475569', fontWeight: 500 }}>(participants must submit these)</span>
+              </div>
+              <Button size="sm" variant="secondary" leftIcon={<ExternalLink size={13} />} onClick={() => router.push('/manager/submissions')}>
+                Review All Submissions
+              </Button>
+            </div>
+            {submissionTypes.length === 0 ? (
+              <div style={{ padding: '20px', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.08)', textAlign: 'center' }}>
+                <p style={{ fontSize: 13, color: '#475569' }}>
+                  No submission types configured.{' '}
+                  <button onClick={() => router.push(`/manager/hackathons/${hack.id}/edit`)}
+                    style={{ background: 'none', border: 'none', color: '#818cf8', cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit', fontSize: 13 }}>
+                    Edit hackathon
+                  </button>{' '}
+                  to add them.
+                </p>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
+                {submissionTypes.map(type => {
+                  const meta = SUBMISSION_TYPE_META[type] ?? { icon: '📁', label: type };
+                  return (
+                    <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderRadius: 14, background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.15)' }}>
+                      <span style={{ fontSize: 20 }}>{meta.icon}</span>
+                      <div>
+                        <p style={{ fontSize: 13, fontWeight: 700, color: '#c7d2fe' }}>{meta.label}</p>
+                        <p style={{ fontSize: 11, color: '#475569' }}>Required</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </motion.div>
 
         {/* Timeline + Prizes */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
@@ -206,6 +261,7 @@ export default function HackathonDetailPage() {
           ))}
         </div>
       </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </DashboardLayout>
   );
 }

@@ -10,6 +10,7 @@ import {
   getTeamsForHackathon, sendJoinRequest, getUserTeam, getUserRequestStatus,
   type Team
 } from '@/lib/teams';
+import { hasSubmitted } from '@/lib/submissions';
 import { useRouter, useParams } from 'next/navigation';
 import {
   Calendar, Users, Trophy, School, Clock, ChevronRight,
@@ -47,7 +48,8 @@ export default function HackathonDetailPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [alreadyRegistered, setAlreadyRegistered] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'prizes' | 'rules' | 'payment' | 'teams'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'prizes' | 'rules' | 'payment' | 'teams' | 'submit'>('overview');
+  const [hasExistingSubmission, setHasExistingSubmission] = useState(false);
 
   // Teams tab state
   const [teams, setTeams] = useState<Team[]>([]);
@@ -89,6 +91,10 @@ export default function HackathonDetailPage() {
       if (uid && h) {
         const reg = await isRegistered(uid, h.id);
         setAlreadyRegistered(reg);
+        if (reg) {
+          const sub = await hasSubmitted(uid, h.id);
+          setHasExistingSubmission(!!sub);
+        }
       }
       setLoading(false);
     })();
@@ -140,12 +146,14 @@ export default function HackathonDetailPage() {
   };
   const sc = statusColors[hackathon.status] ?? statusColors.upcoming;
 
+  const isActive = hackathon.status === 'active';
   const tabs = [
     { id: 'overview', label: 'Overview' },
     { id: 'prizes',   label: 'Prizes' },
     { id: 'rules',    label: 'Rules' },
     ...(hackathon.has_fees ? [{ id: 'payment', label: '💳 Payment' }] : []),
     ...((hackathon.max_team_size ?? 1) > 1 ? [{ id: 'teams', label: '👥 Teams' }] : []),
+    ...(alreadyRegistered && isActive ? [{ id: 'submit', label: hasExistingSubmission ? '📋 My Submission' : '🚀 Submit Project' }] : []),
   ];
 
   return (
@@ -217,10 +225,25 @@ export default function HackathonDetailPage() {
                 </div>
               )}
               {alreadyRegistered ? (
-                <div style={{ textAlign: 'center' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#34d399', fontWeight: 700, fontSize: 14 }}>
                     <CheckCircle size={16} /> Registered!
                   </div>
+                  {isActive && (
+                    <Button
+                      size="lg"
+                      onClick={() => router.push(`/student/hackathons/${hackathon.id}/submit`)}
+                      rightIcon={<ChevronRight size={14} />}
+                      style={hasExistingSubmission ? { background: 'rgba(16,185,129,0.15)', borderColor: 'rgba(16,185,129,0.3)' } : {}}
+                    >
+                      {hasExistingSubmission ? '📋 View / Edit Submission' : '🚀 Submit Project'}
+                    </Button>
+                  )}
+                  {hackathon.status === 'ended' && hasExistingSubmission && (
+                    <Button size="sm" variant="secondary" onClick={() => router.push('/student/submissions')}>
+                      View My Submissions
+                    </Button>
+                  )}
                 </div>
               ) : hackathon.status === 'ended' ? (
                 <Button disabled variant="secondary">Event Ended</Button>
@@ -383,22 +406,46 @@ export default function HackathonDetailPage() {
           {/* ── Teams Tab ── */}
           {activeTab === 'teams' && (
             <div>
+              {/* Deadline banner */}
+              {hackathon.registration_deadline && (
+                (() => {
+                  const deadlinePassed = new Date(hackathon.registration_deadline) < new Date();
+                  return deadlinePassed ? (
+                    <div style={{ padding: '14px 18px', borderRadius: 14, background: 'rgba(100,116,139,0.08)', border: '1px solid rgba(100,116,139,0.2)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <Lock size={14} color="#64748b" />
+                      <p style={{ fontSize: 13, color: '#94a3b8' }}>Registration closed. Teams are locked and no new members can join.</p>
+                    </div>
+                  ) : (
+                    <div style={{ padding: '14px 18px', borderRadius: 14, background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.15)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Clock size={14} color="#34d399" />
+                        <p style={{ fontSize: 13, color: '#34d399', fontWeight: 600 }}>Registration open until {new Date(hackathon.registration_deadline).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+                      </div>
+                      {!alreadyRegistered && hackathon.status !== 'ended' && (
+                        <Button size="sm" onClick={() => router.push(`/student/hackathons/${hackathon.id}/register`)} rightIcon={<ChevronRight size={12} />}>
+                          Register / Join Team
+                        </Button>
+                      )}
+                    </div>
+                  );
+                })()
+              )}
+
               {/* My team banner */}
               {myTeam && (
                 <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
                   style={{ padding: '18px 24px', borderRadius: 16, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
                   <CheckCircle size={18} color="#34d399" />
                   <div style={{ flex: 1 }}>
-                    <p style={{ fontSize: 14, fontWeight: 800, color: '#34d399' }}>You&apos;re on Team: {myTeam.name}</p>
+                    <p style={{ fontSize: 14, fontWeight: 800, color: '#34d399' }}>You&apos;re on Team: <span style={{ color: '#6ee7b7' }}>{myTeam.name}</span></p>
                     <p style={{ fontSize: 12, color: '#64748b' }}>
                       {myTeam.leader_id === userId ? '👑 You are the team leader' : '👤 Team member'}
+                      {' · '}Manage your roster from the Team page
                     </p>
                   </div>
-                  {myTeam.leader_id === userId && (
-                    <Button size="sm" onClick={() => router.push(`/student/hackathons/${hackathon.id}/my-team`)}>
-                      Manage Team
-                    </Button>
-                  )}
+                  <Button size="sm" onClick={() => router.push(`/student/hackathons/${hackathon.id}/my-team`)}>
+                    {myTeam.leader_id === userId ? 'Manage Team' : 'View Team'}
+                  </Button>
                 </motion.div>
               )}
 
@@ -410,9 +457,9 @@ export default function HackathonDetailPage() {
                 <div style={{ textAlign: 'center', padding: '60px 0' }}>
                   <Users size={40} style={{ margin: '0 auto 16px', opacity: 0.2 }} />
                   <p style={{ fontSize: 15, fontWeight: 700, color: '#475569', marginBottom: 6 }}>No teams yet</p>
-                  <p style={{ fontSize: 13, color: '#475569' }}>Be the first — register and create your team!</p>
+                  <p style={{ fontSize: 13, color: '#475569', marginBottom: 16 }}>Be the first — register and create your team!</p>
                   {!alreadyRegistered && hackathon.status !== 'ended' && (
-                    <Button style={{ marginTop: 16 }} onClick={() => router.push(`/student/hackathons/${hackathon.id}/register`)}>
+                    <Button onClick={() => router.push(`/student/hackathons/${hackathon.id}/register`)}>
                       Create a Team
                     </Button>
                   )}
@@ -429,59 +476,68 @@ export default function HackathonDetailPage() {
                       <motion.div key={team.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}>
                         <div style={{
                           padding: '24px', borderRadius: 20,
-                          background: isMine ? 'rgba(16,185,129,0.06)' : 'rgba(255,255,255,0.025)',
-                          border: `1px solid ${isMine ? 'rgba(16,185,129,0.25)' : isFull ? 'rgba(255,255,255,0.05)' : 'rgba(99,102,241,0.15)'}`,
-                          opacity: isFull && !isMine ? 0.7 : 1,
+                          background: isMine ? 'rgba(16,185,129,0.06)' : reqStatus === 'pending' ? 'rgba(251,191,36,0.04)' : 'rgba(255,255,255,0.025)',
+                          border: `1px solid ${isMine ? 'rgba(16,185,129,0.25)' : reqStatus === 'pending' ? 'rgba(251,191,36,0.2)' : isFull ? 'rgba(255,255,255,0.05)' : 'rgba(99,102,241,0.15)'}`,
+                          opacity: isFull && !isMine && reqStatus === 'none' ? 0.75 : 1,
+                          transition: 'all 0.15s',
                         }}>
-                          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
-                            <div>
-                              <h3 style={{ fontSize: 16, fontWeight: 800, color: '#f1f5f9', marginBottom: 4 }}>{team.name}</h3>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
+                            <div style={{ flex: 1 }}>
+                              <h3 style={{ fontSize: 15, fontWeight: 800, color: '#f1f5f9', marginBottom: 4 }}>{team.name}</h3>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#64748b' }}>
                                 <Crown size={11} color="#fbbf24" />
                                 <span>{team.leader?.name ?? 'Leader'}</span>
                               </div>
                             </div>
                             <span style={{
-                              padding: '4px 10px', borderRadius: 99, fontSize: 11, fontWeight: 700,
+                              padding: '4px 10px', borderRadius: 99, fontSize: 11, fontWeight: 700, flexShrink: 0,
                               background: isFull ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)',
                               color: isFull ? '#f87171' : '#34d399',
                               display: 'flex', alignItems: 'center', gap: 4,
                             }}>
-                              {isFull ? <><Lock size={10} /> Full</> : `${spotsLeft} spot${spotsLeft !== 1 ? 's' : ''} open`}
+                              {isFull ? <><Lock size={10} /> Full</> : `${spotsLeft} open`}
                             </span>
                           </div>
 
                           {/* Member bar */}
-                          <div style={{ marginBottom: 16 }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#475569', marginBottom: 6 }}>
+                          <div style={{ marginBottom: 14 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#475569', marginBottom: 5 }}>
                               <span>Members</span>
-                              <span>{team.member_count ?? 0} / {team.max_size}</span>
+                              <span style={{ fontWeight: 700, color: isFull ? '#f87171' : '#34d399' }}>{team.member_count ?? 0} / {team.max_size}</span>
                             </div>
-                            <div style={{ height: 4, borderRadius: 99, background: 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
-                              <div style={{ height: '100%', width: `${Math.round(((team.member_count ?? 0) / team.max_size) * 100)}%`, background: isFull ? '#ef4444' : '#34d399', borderRadius: 99, transition: 'width 0.5s' }} />
+                            <div style={{ display: 'flex', gap: 3 }}>
+                              {Array.from({ length: team.max_size }).map((_, idx) => (
+                                <div key={idx} style={{ flex: 1, height: 5, borderRadius: 99, background: idx < (team.member_count ?? 0) ? (isFull ? '#ef4444' : '#34d399') : 'rgba(255,255,255,0.07)', transition: 'background 0.3s' }} />
+                              ))}
                             </div>
                           </div>
 
                           {/* Action */}
-                          {isMine ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#34d399', fontSize: 12, fontWeight: 700 }}>
-                              <UserCheck size={14} /> Your Team
-                            </div>
-                          ) : !userId ? (
-                            <Button size="sm" variant="secondary" onClick={() => router.push('/signin')}>Sign in to join</Button>
-                          ) : myTeam ? (
-                            <span style={{ fontSize: 12, color: '#475569' }}>You&apos;re already on a team</span>
-                          ) : isFull ? (
-                            <span style={{ fontSize: 12, color: '#475569', display: 'flex', alignItems: 'center', gap: 5 }}><Lock size={11} /> Team is full</span>
-                          ) : reqStatus === 'pending' ? (
-                            <span style={{ fontSize: 12, color: '#fbbf24', fontWeight: 700 }}>⏳ Request pending…</span>
-                          ) : reqStatus === 'accepted' ? (
-                            <span style={{ fontSize: 12, color: '#34d399', fontWeight: 700 }}>✓ Request accepted!</span>
-                          ) : (
-                            <Button size="sm" onClick={() => setJoinModal({ team })} leftIcon={<Send size={12} />}>
-                              Request to Join
-                            </Button>
-                          )}
+                          <div style={{ minHeight: 32 }}>
+                            {isMine ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#34d399', fontSize: 12, fontWeight: 700 }}>
+                                <UserCheck size={14} /> Your Team
+                              </div>
+                            ) : !userId ? (
+                              <Button size="sm" variant="secondary" onClick={() => router.push('/signin')}>Sign in to join</Button>
+                            ) : myTeam ? (
+                              <span style={{ fontSize: 12, color: '#475569' }}>You&apos;re on another team</span>
+                            ) : isFull ? (
+                              <span style={{ fontSize: 12, color: '#475569', display: 'flex', alignItems: 'center', gap: 5 }}><Lock size={11} /> Team is full</span>
+                            ) : reqStatus === 'pending' ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ fontSize: 12, color: '#fbbf24', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}><Clock size={11} /> Pending…</span>
+                              </div>
+                            ) : reqStatus === 'accepted' ? (
+                              <span style={{ fontSize: 12, color: '#34d399', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}><CheckCircle size={12} /> Accepted!</span>
+                            ) : hackathon.status === 'ended' ? (
+                              <span style={{ fontSize: 12, color: '#475569' }}>Event ended</span>
+                            ) : (
+                              <Button size="sm" onClick={() => setJoinModal({ team })} leftIcon={<Send size={12} />}>
+                                Request to Join
+                              </Button>
+                            )}
+                          </div>
                         </div>
                       </motion.div>
                     );
@@ -491,9 +547,77 @@ export default function HackathonDetailPage() {
 
               <div style={{ marginTop: 20, padding: '14px 18px', borderRadius: 12, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
                 <p style={{ fontSize: 12, color: '#475569' }}>
-                  💡 Don&apos;t see an open team? <button onClick={() => router.push(`/student/hackathons/${hackathon.id}/register`)} style={{ background: 'none', border: 'none', color: '#818cf8', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>Create your own team</button> and invite friends.
+                  💡 You can send requests to multiple teams. Once accepted, you&apos;ll be automatically registered.{' '}
+                  {!alreadyRegistered && <><button onClick={() => router.push(`/student/hackathons/${hackathon.id}/register`)} style={{ background: 'none', border: 'none', color: '#818cf8', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>Create your own team</button> and invite friends.</> }
                 </p>
               </div>
+            </div>
+          )}
+
+          {/* ── Submit Tab ── */}
+          {activeTab === 'submit' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              {/* What to submit */}
+              {hackathon.submission_types?.length > 0 && (
+                <div style={{ padding: '28px 32px', borderRadius: 20, background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                  <h3 style={{ fontSize: 15, fontWeight: 800, color: '#f1f5f9', marginBottom: 6 }}>Required Deliverables</h3>
+                  <p style={{ fontSize: 13, color: '#64748b', marginBottom: 18 }}>The event manager has specified the following submission types:</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {hackathon.submission_types.map((type: string) => {
+                      const meta = { github: { icon: '🔗', label: 'GitHub Repository', desc: 'Link to your public GitHub repo.' }, pdf: { icon: '📄', label: 'PDF Document', desc: 'Project report or documentation.' }, ppt: { icon: '📊', label: 'Presentation (PPT/PPTX)', desc: 'Slide deck for your project pitch.' }, website: { icon: '🌐', label: 'Website / Demo URL', desc: 'Live demo or deployed website link.' }, video: { icon: '🎥', label: 'Video Demo', desc: 'Short video walkthrough of your project.' }, zip: { icon: '📦', label: 'ZIP Archive', desc: 'Source code or assets as a zip.' } }[type] ?? { icon: '📁', label: type, desc: '' };
+                      return (
+                        <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px', borderRadius: 14, background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.12)' }}>
+                          <span style={{ fontSize: 22, flexShrink: 0 }}>{meta.icon}</span>
+                          <div>
+                            <p style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0', marginBottom: 2 }}>{meta.label}</p>
+                            <p style={{ fontSize: 12, color: '#64748b' }}>{meta.desc}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* CTA */}
+              <div style={{ padding: '32px', borderRadius: 20, background: 'linear-gradient(135deg, rgba(99,102,241,0.12), rgba(59,130,246,0.06))', border: '1px solid rgba(99,102,241,0.25)', textAlign: 'center' }}>
+                {hasExistingSubmission ? (
+                  <>
+                    <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                      <CheckCircle size={26} color="#34d399" />
+                    </div>
+                    <h3 style={{ fontSize: 18, fontWeight: 900, color: '#f1f5f9', marginBottom: 8 }}>Project Submitted! 🎉</h3>
+                    <p style={{ fontSize: 14, color: '#94a3b8', marginBottom: 20 }}>You have already submitted a project. You can edit it until the hackathon ends.</p>
+                    <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+                      <Button onClick={() => router.push(`/student/hackathons/${hackathon.id}/submit`)}>View / Edit Submission</Button>
+                      <Button variant="secondary" onClick={() => router.push('/student/submissions')}>All My Submissions</Button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                      <UploadIcon size={26} color="#818cf8" />
+                    </div>
+                    <h3 style={{ fontSize: 18, fontWeight: 900, color: '#f1f5f9', marginBottom: 8 }}>Ready to Submit?</h3>
+                    <p style={{ fontSize: 14, color: '#94a3b8', marginBottom: 20 }}>
+                      Upload your project deliverables. You can update your submission any time before the event ends.
+                    </p>
+                    <Button size="lg" onClick={() => router.push(`/student/hackathons/${hackathon.id}/submit`)}>
+                      🚀 Submit My Project
+                    </Button>
+                  </>
+                )}
+              </div>
+
+              {/* Timeline note */}
+              {hackathon.end_date && (
+                <div style={{ padding: '14px 18px', borderRadius: 14, background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.12)', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Clock size={14} color="#818cf8" />
+                  <p style={{ fontSize: 13, color: '#a5b4fc' }}>
+                    Submission deadline: <strong>{new Date(hackathon.end_date).toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</strong>
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </motion.div>
