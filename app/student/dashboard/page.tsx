@@ -7,8 +7,9 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { getPublicHackathons, getMyRegistrations, getMyCertificates, type Hackathon, type Registration, type Certificate } from '@/lib/db';
 import { getMyFullSubmissions, type FullSubmission } from '@/lib/submissions';
+import { getInvitesForUser, acceptInvite, declineRequest, type TeamRequest } from '@/lib/teams';
 import { supabase } from '@/lib/supabase';
-import { Zap, Trophy, Calendar, Award, Loader2, ArrowRight, Upload, FileText, CheckCircle } from 'lucide-react';
+import { Zap, Trophy, Calendar, Award, Loader2, ArrowRight, Upload, FileText, CheckCircle, Bell, Users, Crown, X, Mail } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { formatDate } from '@/lib/utils';
 import { useAuth } from '@/context/AuthProvider';
@@ -20,12 +21,21 @@ export default function StudentDashboard() {
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [certificates, setCertificates] = useState<Certificate[]>([]);
   const [submissions, setSubmissions] = useState<FullSubmission[]>([]);
+  const [invites, setInvites] = useState<TeamRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [processingInvite, setProcessingInvite] = useState<string | null>(null);
+  const [inviteToast, setInviteToast] = useState<{ msg: string; type: 'ok' | 'err' } | null>(null);
+
+  const [userId, setUserId] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
       const uid = session?.user?.id;
+      const email = session?.user?.email;
+      setUserId(uid ?? null);
+      setUserEmail(email ?? null);
       if (uid) {
         const [hacks, regs, certs, subs] = await Promise.all([
           getPublicHackathons(),
@@ -37,15 +47,48 @@ export default function StudentDashboard() {
         setRegistrations(regs);
         setCertificates(certs);
         setSubmissions(subs);
+
+        // Load invites by email
+        if (email) {
+          const inv = await getInvitesForUser(email);
+          setInvites(inv);
+        }
       }
       setLoading(false);
     })();
   }, []);
 
+  const showToast = (msg: string, type: 'ok' | 'err' = 'ok') => {
+    setInviteToast({ msg, type });
+    setTimeout(() => setInviteToast(null), 4000);
+  };
+
+  const handleAcceptInvite = async (invite: TeamRequest) => {
+    if (!userId || !invite.team) return;
+    setProcessingInvite(invite.id);
+    const { error } = await acceptInvite(invite.id, invite.team_id, invite.team.hackathon_id, userId);
+    setProcessingInvite(null);
+    if (error) { showToast('Failed: ' + error, 'err'); return; }
+    setInvites(prev => prev.filter(i => i.id !== invite.id));
+    showToast(`You joined Team ${invite.team?.name ?? ''}! 🎉`);
+    // Refresh registrations
+    if (userId) {
+      const regs = await getMyRegistrations(userId);
+      setRegistrations(regs);
+    }
+  };
+
+  const handleDeclineInvite = async (inviteId: string, teamName?: string) => {
+    setProcessingInvite(inviteId);
+    await declineRequest(inviteId);
+    setProcessingInvite(null);
+    setInvites(prev => prev.filter(i => i.id !== inviteId));
+    showToast(`Invite from ${teamName ?? 'team'} declined.`);
+  };
+
   const active = hackathons.filter(h => h.status === 'active');
   const upcoming = hackathons.filter(h => h.status === 'upcoming');
   const myActiveRegs = registrations.filter(r => (r.hackathons as Hackathon)?.status === 'active');
-  const pendingSubs = submissions.filter(s => s.status === 'submitted' || s.status === 'reviewed');
 
   const statItems = [
     { label: 'Registered Events', value: loading ? '—' : registrations.length, icon: <Zap size={20} className="text-indigo-400" />, change: 'All time', dir: 'neutral' as const },
@@ -57,6 +100,29 @@ export default function StudentDashboard() {
   return (
     <DashboardLayout title={`Welcome back, ${user?.name?.split(' ')[0] ?? 'Student'} 👋`} subtitle="Your hackathon journey at a glance">
 
+      {/* Toast */}
+      <AnimatePresence>
+        {inviteToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20 }}
+            style={{
+              position: 'fixed', top: 24, right: 24, zIndex: 9999,
+              padding: '14px 22px', borderRadius: 16, fontWeight: 700, fontSize: 14,
+              display: 'flex', alignItems: 'center', gap: 10,
+              background: inviteToast.type === 'ok' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+              border: `1px solid ${inviteToast.type === 'ok' ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.4)'}`,
+              color: inviteToast.type === 'ok' ? '#34d399' : '#f87171',
+              backdropFilter: 'blur(10px)',
+            }}
+          >
+            {inviteToast.type === 'ok' ? '✓' : '✗'} {inviteToast.msg}
+            <button onClick={() => setInviteToast(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', opacity: 0.6 }}><X size={13} /></button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginBottom: 28 }}>
         {statItems.map((s, i) => (
@@ -65,6 +131,78 @@ export default function StudentDashboard() {
           </motion.div>
         ))}
       </div>
+
+      {/* ── Team Invitations Banner ── */}
+      <AnimatePresence>
+        {!loading && invites.length > 0 && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={{ marginBottom: 24 }}>
+            <Card style={{ background: 'rgba(99,102,241,0.06)', borderColor: 'rgba(99,102,241,0.25)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 12, background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Bell size={16} color="#818cf8" />
+                </div>
+                <div>
+                  <CardTitle>Team Invitations</CardTitle>
+                  <CardSubtitle>{invites.length} pending invite{invites.length > 1 ? 's' : ''} from team leaders</CardSubtitle>
+                </div>
+                <span style={{ marginLeft: 'auto', padding: '3px 12px', borderRadius: 99, fontSize: 12, fontWeight: 700, background: 'rgba(99,102,241,0.15)', color: '#a5b4fc' }}>
+                  {invites.length} new
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {invites.map((invite, i) => (
+                  <motion.div key={invite.id} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.06 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', padding: '16px 20px', borderRadius: 16, background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(99,102,241,0.15)', flexWrap: 'wrap', gap: 12 }}>
+                      <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <Crown size={18} color="#fbbf24" />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 180 }}>
+                        <p style={{ fontSize: 14, fontWeight: 800, color: '#f1f5f9', marginBottom: 3 }}>
+                          You&apos;re invited to join <span style={{ color: '#a5b4fc' }}>{invite.team?.name ?? 'a team'}</span>
+                        </p>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#64748b' }}>
+                          <Users size={11} />
+                          <span>Team leader sent an invitation to your email</span>
+                          <span style={{ color: '#475569' }}>·</span>
+                          <span>{new Date(invite.created_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}</span>
+                        </div>
+                        {invite.team?.hackathon_id && (
+                          <button
+                            onClick={() => router.push(`/student/hackathons/${invite.team?.hackathon_id}`)}
+                            style={{ marginTop: 4, background: 'none', border: 'none', cursor: 'pointer', color: '#818cf8', fontSize: 11, fontWeight: 700, fontFamily: 'inherit', padding: 0 }}
+                          >
+                            View Hackathon →
+                          </button>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          leftIcon={<X size={12} />}
+                          isLoading={processingInvite === invite.id}
+                          onClick={() => handleDeclineInvite(invite.id, invite.team?.name)}
+                          style={{ color: '#f87171', borderColor: 'rgba(239,68,68,0.3)' }}
+                        >
+                          Decline
+                        </Button>
+                        <Button
+                          size="sm"
+                          leftIcon={<CheckCircle size={12} />}
+                          isLoading={processingInvite === invite.id}
+                          onClick={() => handleAcceptInvite(invite)}
+                        >
+                          Accept & Join
+                        </Button>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </Card>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Active hackathon submit banner */}
       <AnimatePresence>
@@ -217,7 +355,7 @@ export default function StudentDashboard() {
       )}
 
       {/* Quick Actions */}
-      {!loading && myActiveRegs.length === 0 && submissions.length === 0 && (
+      {!loading && myActiveRegs.length === 0 && submissions.length === 0 && invites.length === 0 && (
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
           <Card style={{ background: 'rgba(99,102,241,0.04)', borderColor: 'rgba(99,102,241,0.15)' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>

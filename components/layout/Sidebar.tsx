@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, Building2, FileText, BarChart3,
   LogOut, GraduationCap, Zap, UserCog, Menu, X, BookOpen,
   Award, Bookmark, Send, PlusCircle, Eye, Megaphone, ClipboardList,
-  ChevronLeft, Settings, Home
+  ChevronLeft, Settings, Home, Bell
 } from 'lucide-react';
 import type { UserRole } from '@/lib/auth';
 
@@ -105,6 +105,7 @@ function getNavSections(role: UserRole): NavSection[] {
           title: 'My Activity',
           items: [
             { label: 'My Registrations', href: '/student/registrations', icon: <ClipboardList size={18} /> },
+            { label: 'Team Invites', href: '/student/team-requests', icon: <Bell size={18} /> },
             { label: 'Submissions', href: '/student/submissions', icon: <Send size={18} /> },
             { label: 'Certificates', href: '/student/certificates', icon: <Award size={18} /> },
           ],

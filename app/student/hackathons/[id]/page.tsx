@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/Button';
@@ -11,12 +11,13 @@ import {
   type Team
 } from '@/lib/teams';
 import { hasSubmitted } from '@/lib/submissions';
+import { getMyPaymentProof, uploadPaymentProof, type PaymentProof } from '@/lib/payments';
 import { useRouter, useParams } from 'next/navigation';
 import {
   Calendar, Users, Trophy, School, Clock, ChevronRight,
   FileCode2, FileText, Globe, Presentation, Upload as UploadIcon,
   File, CreditCard, ArrowLeft, CheckCircle, ExternalLink, Shield,
-  Crown, Lock, UserCheck, Send, X, Loader2
+  Crown, Lock, UserCheck, Send, X, Loader2, ImagePlus, AlertCircle
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 
@@ -61,6 +62,15 @@ export default function HackathonDetailPage() {
   const [joining, setJoining] = useState(false);
   const [joinSuccess, setJoinSuccess] = useState<string | null>(null);
 
+  // Payment proof state
+  const [paymentProof, setPaymentProof] = useState<PaymentProof | null>(null);
+  const [paymentProofLoading, setPaymentProofLoading] = useState(false);
+  const [uploadingProof, setUploadingProof] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const loadTeams = useCallback(async (hackathonId: string, uid: string | null) => {
     setTeamsLoading(true);
     const data = await getTeamsForHackathon(hackathonId);
@@ -95,10 +105,49 @@ export default function HackathonDetailPage() {
           const sub = await hasSubmitted(uid, h.id);
           setHasExistingSubmission(!!sub);
         }
+        // Load payment proof if hackathon has fees
+        if (h.has_fees) {
+          const proof = await getMyPaymentProof(uid, h.id);
+          setPaymentProof(proof);
+        }
       }
       setLoading(false);
     })();
   }, [id]);
+
+  // Load payment proof when switching to payment tab
+  useEffect(() => {
+    if (activeTab === 'payment' && hackathon?.has_fees && userId && !paymentProof && !paymentProofLoading) {
+      setPaymentProofLoading(true);
+      getMyPaymentProof(userId, hackathon.id).then(proof => {
+        setPaymentProof(proof);
+        setPaymentProofLoading(false);
+      });
+    }
+  }, [activeTab, hackathon, userId, paymentProof, paymentProofLoading]);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) { setUploadError('File too large. Max 10MB.'); return; }
+    setSelectedFile(file);
+    setUploadError(null);
+    const reader = new FileReader();
+    reader.onload = () => setPreviewUrl(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const handleUploadProof = async () => {
+    if (!selectedFile || !userId || !hackathon) return;
+    setUploadingProof(true);
+    setUploadError(null);
+    const { proof, error } = await uploadPaymentProof(userId, hackathon.id, selectedFile);
+    setUploadingProof(false);
+    if (error) { setUploadError(error); return; }
+    setPaymentProof(proof);
+    setSelectedFile(null);
+    setPreviewUrl(null);
+  };
 
   // Load teams when teams tab is activated
   useEffect(() => {
@@ -374,32 +423,166 @@ export default function HackathonDetailPage() {
 
           {/* Payment */}
           {activeTab === 'payment' && hackathon.has_fees && (
-            <div style={{ padding: '32px', borderRadius: 20, background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.07)', maxWidth: 480 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24 }}>
-                <CreditCard size={18} color="#818cf8" />
-                <h3 style={{ fontSize: 15, fontWeight: 800, color: '#f1f5f9' }}>Registration Fee</h3>
-              </div>
-              <div style={{ padding: '20px 24px', borderRadius: 16, background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.2)', marginBottom: 24, textAlign: 'center' }}>
-                <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>Fee Amount</p>
-                <p style={{ fontSize: 28, fontWeight: 900, color: '#fbbf24' }}>{hackathon.fees_amount ?? 'TBD'}</p>
-              </div>
-              {hackathon.upi_id && (
-                <div style={{ marginBottom: 20 }}>
-                  <p style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>UPI ID</p>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                    <p style={{ fontSize: 15, fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace' }}>{hackathon.upi_id}</p>
+            <div style={{ maxWidth: 520, display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+              {/* Fee info */}
+              <div style={{ padding: '28px 32px', borderRadius: 20, background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+                  <CreditCard size={18} color="#818cf8" />
+                  <h3 style={{ fontSize: 15, fontWeight: 800, color: '#f1f5f9' }}>Registration Fee</h3>
+                </div>
+                <div style={{ padding: '20px 24px', borderRadius: 16, background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.2)', marginBottom: 20, textAlign: 'center' }}>
+                  <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>Fee Amount</p>
+                  <p style={{ fontSize: 28, fontWeight: 900, color: '#fbbf24' }}>{hackathon.fees_amount ?? 'TBD'}</p>
+                </div>
+                {hackathon.upi_id && (
+                  <div style={{ marginBottom: 16 }}>
+                    <p style={{ fontSize: 12, color: '#64748b', marginBottom: 8 }}>Pay via UPI ID</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 18px', borderRadius: 14, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                      <p style={{ fontSize: 16, fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace', flex: 1 }}>{hackathon.upi_id}</p>
+                      <button
+                        onClick={() => { navigator.clipboard.writeText(hackathon.upi_id ?? ''); }}
+                        style={{ padding: '6px 12px', borderRadius: 8, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', cursor: 'pointer', fontSize: 11, color: '#818cf8', fontWeight: 700, fontFamily: 'inherit' }}
+                      >
+                        Copy
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )}
-              {hackathon.payment_qr_url && (
-                <div>
-                  <p style={{ fontSize: 12, color: '#64748b', marginBottom: 10 }}>Scan QR to Pay</p>
-                  <img src={hackathon.payment_qr_url} alt="Payment QR" style={{ width: 200, height: 200, objectFit: 'contain', borderRadius: 16, border: '1px solid rgba(255,255,255,0.1)', background: 'white', padding: 12 }} />
-                </div>
-              )}
-              <div style={{ marginTop: 20, padding: '12px 16px', borderRadius: 10, background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.15)' }}>
-                <p style={{ fontSize: 13, color: '#fde68a' }}>⚠ Pay before registering. Keep your payment screenshot for verification.</p>
+                )}
+                {hackathon.payment_qr_url && (
+                  <div>
+                    <p style={{ fontSize: 12, color: '#64748b', marginBottom: 10 }}>Or Scan QR to Pay</p>
+                    <img src={hackathon.payment_qr_url} alt="Payment QR" style={{ width: 180, height: 180, objectFit: 'contain', borderRadius: 16, border: '1px solid rgba(255,255,255,0.1)', background: 'white', padding: 12 }} />
+                  </div>
+                )}
               </div>
+
+              {/* Payment proof upload */}
+              {userId ? (
+                <div style={{ padding: '28px 32px', borderRadius: 20, background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+                    <ImagePlus size={18} color="#818cf8" />
+                    <h3 style={{ fontSize: 15, fontWeight: 800, color: '#f1f5f9' }}>Upload Payment Proof</h3>
+                  </div>
+
+                  {paymentProofLoading ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '24px 0', justifyContent: 'center', color: '#64748b' }}>
+                      <Loader2 size={16} style={{ animation: 'spin 0.8s linear infinite' }} /> Loading status…
+                    </div>
+                  ) : paymentProof ? (
+                    <>
+                      {/* Status badge */}
+                      <div style={{
+                        padding: '16px 20px', borderRadius: 16, marginBottom: 16,
+                        background: paymentProof.status === 'approved' ? 'rgba(16,185,129,0.08)' : paymentProof.status === 'rejected' ? 'rgba(239,68,68,0.08)' : 'rgba(251,191,36,0.08)',
+                        border: `1px solid ${paymentProof.status === 'approved' ? 'rgba(16,185,129,0.3)' : paymentProof.status === 'rejected' ? 'rgba(239,68,68,0.3)' : 'rgba(251,191,36,0.3)'}`,
+                        display: 'flex', alignItems: 'center', gap: 12
+                      }}>
+                        <div style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: paymentProof.status === 'approved' ? 'rgba(16,185,129,0.15)' : paymentProof.status === 'rejected' ? 'rgba(239,68,68,0.15)' : 'rgba(251,191,36,0.15)', flexShrink: 0 }}>
+                          {paymentProof.status === 'approved' ? <CheckCircle size={20} color="#34d399" /> : paymentProof.status === 'rejected' ? <X size={20} color="#f87171" /> : <Clock size={20} color="#fbbf24" />}
+                        </div>
+                        <div>
+                          <p style={{ fontSize: 14, fontWeight: 800, color: paymentProof.status === 'approved' ? '#34d399' : paymentProof.status === 'rejected' ? '#f87171' : '#fbbf24', marginBottom: 2 }}>
+                            {paymentProof.status === 'approved' ? '✅ Payment Approved!' : paymentProof.status === 'rejected' ? '❌ Payment Rejected' : '⏳ Awaiting Review'}
+                          </p>
+                          <p style={{ fontSize: 12, color: '#64748b' }}>
+                            {paymentProof.status === 'approved'
+                              ? 'Your payment has been verified. You are eligible for the team.'
+                              : paymentProof.status === 'rejected'
+                              ? `Rejected: ${paymentProof.notes ?? 'Please re-upload a valid screenshot.'}`
+                              : 'Your screenshot is under review by the organizer.'}
+                          </p>
+                          <p style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>Uploaded: {new Date(paymentProof.uploaded_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
+                        </div>
+                      </div>
+
+                      {/* Allow re-upload if rejected or pending */}
+                      {paymentProof.status !== 'approved' && (
+                        <div style={{ marginTop: 4 }}>
+                          <p style={{ fontSize: 12, color: '#64748b', marginBottom: 12 }}>
+                            {paymentProof.status === 'rejected' ? 'Re-upload a clear screenshot of your successful payment:' : 'Want to replace your screenshot? Upload a new one:'}
+                          </p>
+                          <input ref={fileInputRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={handleFileSelect} />
+                          {!selectedFile ? (
+                            <button
+                              onClick={() => fileInputRef.current?.click()}
+                              style={{ width: '100%', padding: '16px', borderRadius: 14, border: '2px dashed rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.04)', cursor: 'pointer', color: '#818cf8', fontFamily: 'inherit', fontSize: 13, fontWeight: 700 }}
+                            >
+                              📎 Choose new file
+                            </button>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                              {previewUrl && <img src={previewUrl} alt="Preview" style={{ width: '100%', maxHeight: 200, objectFit: 'contain', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)' }} />}
+                              <div style={{ display: 'flex', gap: 8 }}>
+                                <Button variant="secondary" size="sm" onClick={() => { setSelectedFile(null); setPreviewUrl(null); }} style={{ flex: 1 }}>Cancel</Button>
+                                <Button size="sm" onClick={handleUploadProof} isLoading={uploadingProof} leftIcon={<UploadIcon size={13} />} style={{ flex: 1 }}>Re-upload</Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    // No proof uploaded yet
+                    <div>
+                      <div style={{ padding: '14px 16px', borderRadius: 14, background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.2)', marginBottom: 16 }}>
+                        <p style={{ fontSize: 13, color: '#fde68a', fontWeight: 600, marginBottom: 4 }}>⚠ Screenshot Required</p>
+                        <p style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
+                          Upload a screenshot of your payment confirmation. Your registration will be verified once the organizer approves your payment proof.
+                        </p>
+                      </div>
+
+                      <input ref={fileInputRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={handleFileSelect} />
+
+                      {!selectedFile ? (
+                        <button
+                          onClick={() => fileInputRef.current?.click()}
+                          style={{
+                            width: '100%', padding: '32px 20px', borderRadius: 18,
+                            border: '2px dashed rgba(99,102,241,0.3)',
+                            background: 'rgba(99,102,241,0.04)',
+                            cursor: 'pointer', color: '#818cf8',
+                            fontFamily: 'inherit',
+                            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
+                            transition: 'all 0.15s'
+                          }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(99,102,241,0.6)'; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(99,102,241,0.08)'; }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(99,102,241,0.3)'; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(99,102,241,0.04)'; }}
+                        >
+                          <ImagePlus size={28} color="#818cf8" />
+                          <span style={{ fontSize: 13, fontWeight: 700 }}>Click to Upload Payment Screenshot</span>
+                          <span style={{ fontSize: 11, color: '#475569' }}>PNG, JPG, PDF — Max 10MB</span>
+                        </button>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                          {previewUrl && (
+                            <img src={previewUrl} alt="Payment screenshot preview" style={{ width: '100%', maxHeight: 220, objectFit: 'contain', borderRadius: 14, border: '1px solid rgba(255,255,255,0.1)' }} />
+                          )}
+                          <div style={{ padding: '10px 14px', borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <FileText size={14} color="#64748b" />
+                            <span style={{ fontSize: 13, color: '#94a3b8', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedFile.name}</span>
+                            <span style={{ fontSize: 11, color: '#475569' }}>{(selectedFile.size / 1024).toFixed(0)} KB</span>
+                          </div>
+                          {uploadError && (
+                            <div style={{ padding: '10px 14px', borderRadius: 10, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <AlertCircle size={14} color="#f87171" />
+                              <p style={{ fontSize: 12, color: '#f87171' }}>{uploadError}</p>
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', gap: 10 }}>
+                            <Button variant="secondary" onClick={() => { setSelectedFile(null); setPreviewUrl(null); setUploadError(null); }} style={{ flex: 1 }}>Cancel</Button>
+                            <Button onClick={handleUploadProof} isLoading={uploadingProof} leftIcon={<UploadIcon size={13} />} style={{ flex: 1 }}>Submit Screenshot</Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ padding: '20px', borderRadius: 16, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', textAlign: 'center' }}>
+                  <p style={{ fontSize: 13, color: '#64748b' }}>Please <button onClick={() => router.push('/signin')} style={{ background: 'none', border: 'none', color: '#818cf8', cursor: 'pointer', fontWeight: 700 }}>sign in</button> to upload payment proof.</p>
+                </div>
+              )}
             </div>
           )}
 
